@@ -1,0 +1,48 @@
+# Code quality habits
+### 1. Context block at the top of every file
+Every script must begin with a context block. This is the first thing Claude
+reads and the fastest way for any collaborator to orient themselves. Include:
+design intent, version history, known bugs or caveats.
+# ============================================================================
+# FILE: my_script
+# PURPOSE: One or two sentences explaining what this script does and why.
+# VERSION: 1.0 | YYYY-MM-DD
+# CHANGES:
+# v1.0 YYYY-MM-DD -- Initial implementation
+# CAVEATS:
+# - Note any known limitations or assumptions here
+# ============================================================================
+Apply this to every file in the project.
+### 2. Tidy first
+Before moving to the next piece of work:
+1. Clean up the current piece -- remove dead code, fix variable names,
+ ensure the script runs end-to-end without manual intervention.
+2. Update documentation -- if outputs changed (file names, column names,
+ row counts, behaviour), reflect that in CLAUDE.md immediately.
+3. Update any backlog or task tracker -- mark completed items, add newly
+ discovered issues, keep owner and next-step columns current.
+4. Archive stale content -- if a design decision was explored and rejected,
+ add a brief note so future sessions do not re-explore it. Move superseded
+ work to an Archive/ subfolder rather than deleting.
+5. Commit before starting the next thing -- a clean commit marks the
+ boundary between pieces of work and makes rollback trivial.
+> Tidy First is not about perfection -- it is about not letting mess
+> compound. Clean up enough to move forward confidently, then stop.
+---
+## Test-driven development
+Write tests before writing implementation code. The workflow is:
+1. Write a failing test that specifies the expected behaviour
+2. Run it -- confirm it fails for the right reason
+3. Write the minimum code needed to make it pass
+4. Run the test -- confirm it passes
+5. Refactor (Tidy First), re-run to confirm still green
+Never write implementation code that does not have a test driving it.
+### Test data and fixtures
+- Use small, hand-crafted inputs in tests -- do not depend on real project
+ data files in unit tests
+- Real data files can be used in integration tests for end-to-end smoke
+ checks (row counts, totals matching documented values)
+- Keep tests fast, focused, and independent of each other
+### Running tests
+pytest tests/ -v # run all tests
+pytest tests/ -x # stop on first failure

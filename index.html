@@ -1,0 +1,1893 @@
+<!DOCTYPE html>
+<!-- ============================================================================
+  FILE: index.html
+  PURPOSE: BAE Air project accommodation tracker — Newton internal tool.
+           Two views: team member (sign up, view bookings) and organiser
+           (manage properties, budget, members, send details).
+  VERSION: 1.0 | 2026-05-18
+  CHANGES:
+    v1.0 2026-05-18 -- Initial build. Self-contained single-file app using
+                       localStorage for persistence. No server required.
+  CAVEATS:
+    - Email sending opens the local mail client via mailto: links
+    - Data is stored in the browser's localStorage under 'accom_tracker_v1'
+============================================================================ -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Accommodation tracker — BAE Air</title>
+  <style>
+    :root {
+      --orange:       #FF6223;
+      --orange-dark:  #E5541C;
+      --orange-tint:  #FFF3EE;
+      --slate:        #282D37;
+      --slate-mid:    #3D4452;
+      --slate-light:  #F0F1F3;
+      --bg:           #F5F5F7;
+      --white:        #FFFFFF;
+      --border:       #E5E5EA;
+      --border-strong:#C7C7CC;
+      --success:      #1A7F37;
+      --success-bg:   #F0FBF3;
+      --success-border:#86EFAC;
+      --danger:       #D93025;
+      --danger-bg:    #FFF2F1;
+      --warning:      #C2690A;
+      --warning-bg:   #FFFBF0;
+      --text:         #1D1D1F;
+      --text-muted:   #6E6E73;
+      --text-subtle:  #AEAEB2;
+      --card-r:       12px;
+      --btn-r:        8px;
+      --font:         -apple-system, 'SF Pro Text', 'Aptos', 'Segoe UI', system-ui, sans-serif;
+      --shadow-xs:    0 1px 2px rgba(0,0,0,0.06);
+      --shadow-sm:    0 1px 4px rgba(0,0,0,0.07), 0 4px 12px rgba(0,0,0,0.05);
+      --shadow-md:    0 4px 16px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.05);
+      --shadow-lg:    0 24px 56px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.08);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+
+    /* ── Header ─────────────────────────────────── */
+    .hdr { background: var(--slate); height: 58px; display: flex; align-items: center; justify-content: space-between; padding: 0 28px; box-shadow: 0 1px 0 rgba(255,255,255,0.07); }
+    .hdr-logo { display: flex; align-items: center; gap: 12px; color: #fff; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+    .hdr-bar { width: 3px; height: 22px; background: var(--orange); border-radius: 2px; }
+    .hdr-right { display: flex; align-items: center; gap: 10px; }
+    .hdr-role { color: rgba(255,255,255,0.5); font-size: 12px; }
+
+    /* ── Layout ──────────────────────────────────── */
+    .page { max-width: 1080px; margin: 0 auto; padding: 32px 24px; }
+    .page-hdr { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 28px; gap: 12px; }
+    .page-title { font-size: 22px; font-weight: 700; color: var(--slate); letter-spacing: -0.02em; }
+    .page-sub { font-size: 13px; color: var(--text-muted); margin-top: 3px; }
+
+    /* ── Cards ───────────────────────────────────── */
+    .card { background: var(--white); border: 1px solid var(--border); border-radius: var(--card-r); padding: 22px 24px; box-shadow: var(--shadow-sm); }
+    .card + .card { margin-top: 14px; }
+    .card-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+    .card-title { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+    .card-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+    /* ── Buttons ─────────────────────────────────── */
+    .btn { display: inline-flex; align-items: center; gap: 5px; padding: 9px 18px; border-radius: var(--btn-r); border: none; cursor: pointer; font-size: 13px; font-family: var(--font); font-weight: 500; text-decoration: none; transition: all 0.15s ease; white-space: nowrap; }
+    .btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+    .btn:active:not(:disabled) { transform: translateY(0); box-shadow: none; }
+    .btn:disabled { opacity: 0.38; cursor: not-allowed; }
+    .btn-primary { background: var(--orange); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--orange-dark); }
+    .btn-slate { background: var(--slate); color: #fff; }
+    .btn-outline { background: var(--white); color: var(--slate); border: 1px solid var(--border-strong); }
+    .btn-outline:hover:not(:disabled) { background: var(--slate-light); }
+    .btn-outline-lt { background: transparent; color: rgba(255,255,255,0.85); border: 1px solid rgba(255,255,255,0.25); }
+    .btn-outline-lt:hover:not(:disabled) { background: rgba(255,255,255,0.10); }
+    .btn-ghost { background: transparent; color: var(--text-muted); border: none; box-shadow: none; }
+    .btn-ghost:hover:not(:disabled) { background: var(--slate-light); color: var(--slate); transform: none; box-shadow: none; }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-sm  { padding: 6px 13px; font-size: 12px; }
+    .btn-xs  { padding: 4px 9px; font-size: 11px; border-radius: 6px; }
+    a.btn { display: inline-flex; }
+
+    /* ── Tabs ────────────────────────────────────── */
+    .tabs { display: flex; border-bottom: 1.5px solid var(--border); margin-bottom: 24px; }
+    .tab  { padding: 10px 20px; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--text-muted); border-bottom: 2px solid transparent; margin-bottom: -1.5px; white-space: nowrap; transition: color 0.12s; }
+    .tab:hover { color: var(--slate); }
+    .tab.active { color: var(--orange); border-bottom-color: var(--orange); font-weight: 600; }
+
+    /* ── Forms ───────────────────────────────────── */
+    .fg  { margin-bottom: 16px; }
+    .fg:last-child { margin-bottom: 0; }
+    .fg label { display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.05em; }
+    input[type=text], input[type=email], input[type=number], input[type=url], input[type=date], select, textarea {
+      width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--btn-r);
+      font-size: 13px; font-family: var(--font); color: var(--text); background: var(--white);
+      transition: border-color 0.12s, box-shadow 0.12s;
+    }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: var(--orange); box-shadow: 0 0 0 3px rgba(255,98,35,0.14); }
+    textarea { resize: vertical; min-height: 64px; }
+    .frow   { display: grid; gap: 14px; }
+    .frow-2 { grid-template-columns: 1fr 1fr; }
+    .frow-3 { grid-template-columns: 1fr 1fr 1fr; }
+
+    /* ── Landing ─────────────────────────────────── */
+    .landing { min-height: calc(100vh - 58px); display: flex; align-items: center; justify-content: center; }
+    .landing-inner { text-align: center; max-width: 560px; padding: 32px 24px; }
+    .landing-title { font-size: 32px; font-weight: 700; color: var(--slate); margin-bottom: 8px; letter-spacing: -0.03em; }
+    .landing-sub { color: var(--text-muted); margin-bottom: 40px; font-size: 15px; line-height: 1.6; }
+    .role-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .role-card { background: var(--white); border: 1.5px solid var(--border); border-radius: var(--card-r); padding: 32px 22px; cursor: pointer; text-align: center; transition: all 0.18s ease; box-shadow: var(--shadow-xs); }
+    .role-card:hover { border-color: var(--orange); box-shadow: var(--shadow-md); transform: translateY(-3px); }
+    .role-icon { font-size: 34px; margin-bottom: 14px; }
+    .role-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; letter-spacing: -0.01em; }
+    .role-desc { font-size: 12px; color: var(--text-muted); line-height: 1.6; }
+
+    /* ── Badges ──────────────────────────────────── */
+    .badge { display: inline-block; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+    .b-orange { background: var(--orange-tint); color: var(--orange); }
+    .b-green  { background: var(--success-bg); color: var(--success); }
+    .b-grey   { background: #F2F2F7; color: var(--text-muted); }
+    .b-red    { background: var(--danger-bg); color: var(--danger); }
+
+    /* ── Property cards ──────────────────────────── */
+    .prop-card { background: var(--white); border: 1px solid var(--border); border-radius: var(--card-r); padding: 18px 22px; margin-bottom: 12px; box-shadow: var(--shadow-xs); transition: box-shadow 0.15s, transform 0.15s; }
+    .prop-card:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); }
+    .prop-hdr  { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .prop-name { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+    .prop-meta { font-size: 12px; color: var(--text-muted); margin-top: 5px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    .prop-meta span::before { content: '·'; margin-right: 10px; color: var(--border-strong); }
+    .prop-meta span:first-child::before { content: ''; margin-right: 0; }
+    .prop-acts { display: flex; gap: 6px; flex-shrink: 0; align-items: flex-start; flex-wrap: wrap; }
+    .rooms-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; margin-top: 14px; }
+    .room-chip  { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 12px; transition: all 0.12s; }
+    .room-chip.avail { border-color: var(--success-border); background: var(--success-bg); }
+    .room-chip.avail[data-a] { cursor: pointer; }
+    .room-chip.avail[data-a]:hover { border-color: var(--success); box-shadow: 0 0 0 3px rgba(26,127,55,0.12); transform: translateY(-1px); }
+    .room-chip.taken { background: #F9F9FB; border-color: var(--border); }
+    .room-chip.me    { border-color: var(--success); background: var(--success-bg); border-width: 2px; }
+    .rc-name  { font-weight: 600; margin-bottom: 1px; }
+    .rc-type  { color: var(--text-muted); font-size: 11px; }
+    .rc-who   { font-size: 11px; margin-top: 4px; }
+    .rc-who.avail { color: var(--success); font-weight: 500; }
+    .rc-who.taken { color: var(--orange); }
+
+    /* ── Budget ──────────────────────────────────── */
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(192px, 1fr)); gap: 14px; margin-bottom: 24px; }
+    .stat { background: var(--white); border: 1px solid var(--border); border-radius: var(--card-r); padding: 18px 20px; box-shadow: var(--shadow-xs); transition: box-shadow 0.15s; }
+    .stat:hover { box-shadow: var(--shadow-sm); }
+    .stat-lbl { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 7px; font-weight: 600; }
+    .stat-val { font-size: 26px; font-weight: 700; color: var(--slate); letter-spacing: -0.03em; line-height: 1.1; }
+    .stat-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+    .prog { height: 6px; background: var(--border); border-radius: 6px; overflow: hidden; margin-top: 10px; }
+    .prog-fill { height: 100%; background: var(--orange); border-radius: 6px; transition: width 0.5s ease; }
+    .prog-fill.pf-green { background: var(--success); }
+    .prog-fill.pf-red   { background: #E05555; }
+    .wk-row { background: var(--white); border: 1px solid var(--border); border-radius: var(--card-r); padding: 16px 20px; margin-bottom: 10px; box-shadow: var(--shadow-xs); }
+    .wk-hdr  { display: flex; align-items: center; justify-content: space-between; }
+    .wk-lbl  { font-weight: 600; font-size: 13px; letter-spacing: -0.01em; }
+    .wk-meta { font-size: 11px; color: var(--text-muted); display: flex; flex-wrap: wrap; gap: 16px; margin-top: 8px; }
+
+    /* ── Members ─────────────────────────────────── */
+    .mem-row  { display: flex; align-items: center; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid var(--border); gap: 12px; }
+    .mem-row:last-child { border-bottom: none; }
+    .mem-name { font-weight: 500; font-size: 14px; }
+    .mem-email { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+    .mem-booked { font-size: 11px; color: var(--orange); margin-top: 3px; font-weight: 500; }
+
+    /* ── Modal ───────────────────────────────────── */
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.42); display: flex; align-items: center; justify-content: center; z-index: 200; padding: 20px; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+    .modal   { background: var(--white); border-radius: 16px; padding: 28px; max-width: 640px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: var(--shadow-lg); }
+    .modal-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .modal-title { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; }
+    .modal-close { background: #F2F2F7; border: none; cursor: pointer; color: var(--text-muted); font-size: 16px; line-height: 1; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 50%; transition: background 0.12s; }
+    .modal-close:hover { background: var(--border); color: var(--text); }
+    .modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--border); }
+
+    /* ── Room editor ─────────────────────────────── */
+    .re-row { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 8px; }
+    .re-row .fg { margin-bottom: 0; flex: 1; }
+
+    /* ── Room selector (member signup) ───────────── */
+    .rs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 14px 0; }
+    .rs-item { border: 1.5px solid var(--border); border-radius: 8px; padding: 14px; cursor: pointer; transition: all 0.15s; }
+    .rs-item:hover:not(.rs-full) { border-color: var(--orange); box-shadow: 0 0 0 3px rgba(255,98,35,0.12); }
+    .rs-item.rs-sel  { border-color: var(--orange); background: var(--orange-tint); }
+    .rs-item.rs-full { opacity: 0.4; cursor: not-allowed; background: #F9F9FB; }
+    .rs-name { font-weight: 600; font-size: 13px; }
+    .rs-type { font-size: 11px; color: var(--text-muted); }
+    .rs-who  { font-size: 11px; color: var(--orange); margin-top: 3px; }
+
+    /* ── Booking card (member) ───────────────────── */
+    .info-row { display: flex; align-items: flex-start; gap: 10px; margin-top: 10px; font-size: 13px; }
+    .info-lbl { color: var(--text-muted); flex-shrink: 0; min-width: 95px; font-size: 12px; font-weight: 500; }
+    .roommates { display: flex; flex-wrap: wrap; gap: 5px; }
+    .rtag { background: #F2F2F7; padding: 3px 10px; border-radius: 20px; font-size: 12px; }
+
+    /* ── Email preview ───────────────────────────── */
+    .email-pre { background: #F9F9FB; border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-size: 12px; font-family: 'Courier New', monospace; white-space: pre-wrap; max-height: 320px; overflow-y: auto; }
+
+    /* ── Misc ────────────────────────────────────── */
+    .divider { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+    .empty { text-align: center; padding: 64px 24px; color: var(--text-muted); }
+    .empty-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+    .alert { padding: 12px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 14px; }
+    .alert-info { background: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; }
+    .alert-warn { background: var(--warning-bg); color: var(--warning); border: 1px solid #FDE68A; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; padding: 8px 14px; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); }
+    td { padding: 12px 14px; font-size: 13px; border-bottom: 1px solid var(--border); }
+    tr:last-child td { border-bottom: none; }
+    .flex  { display: flex; }
+    .fb    { display: flex; justify-content: space-between; align-items: center; }
+    .g4    { gap: 4px; }
+    .g6    { gap: 6px; }
+    .g8    { gap: 8px; }
+    .g12   { gap: 12px; }
+    .mb12  { margin-bottom: 12px; }
+    .mb16  { margin-bottom: 16px; }
+    .mt8   { margin-top: 8px; }
+    .mt12  { margin-top: 12px; }
+    .mt16  { margin-top: 16px; }
+    .muted { color: var(--text-muted); }
+    .sm    { font-size: 12px; }
+    .fw6   { font-weight: 600; }
+    .sec-title { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 14px; }
+
+    /* ── Calendar ───────────────────────────────── */
+    .cal-wrap { background: var(--white); border: 1px solid var(--border); border-radius: var(--card-r); padding: 22px 24px; box-shadow: var(--shadow-sm); margin-bottom: 16px; }
+    .cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .cal-title { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; color: var(--slate); }
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
+    .cal-hdr { text-align: center; font-size: 10px; font-weight: 700; color: var(--text-muted); padding: 0 0 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .cal-cell { position: relative; display: flex; align-items: center; justify-content: center; height: 44px; }
+    .cal-num { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 13px; position: relative; z-index: 1; color: var(--text); }
+    .cal-cell.other-month .cal-num { color: var(--text-subtle); }
+    .cal-cell.is-today .cal-num { font-weight: 700; color: var(--orange); }
+    .cal-cell.is-today:not(.booked) .cal-num { border: 2px solid var(--orange); }
+    .cal-cell.booked .cal-num { background: var(--orange); color: #fff; font-weight: 600; }
+    .cal-cell.is-today.booked .cal-num { box-shadow: 0 0 0 3px rgba(255,98,35,0.3); }
+    .cal-range { position: absolute; top: 50%; transform: translateY(-50%); height: 34px; background: rgba(255,98,35,0.13); z-index: 0; pointer-events: none; }
+    .cal-range.rs { left: 50%; right: 0; }
+    .cal-range.re { left: 0; right: 50%; }
+    .cal-range.rm { left: 0; right: 0; }
+    .cal-bk-list { background: var(--white); border: 1px solid var(--border); border-radius: var(--card-r); padding: 20px 24px; box-shadow: var(--shadow-sm); }
+    .cal-bk-item { display: flex; align-items: center; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+    .cal-bk-item:last-child { border-bottom: none; }
+    .cal-bk-bar { width: 4px; min-height: 44px; background: var(--orange); border-radius: 2px; flex-shrink: 0; }
+
+    @media (max-width: 600px) {
+      .frow-2, .frow-3 { grid-template-columns: 1fr; }
+      .role-grid { grid-template-columns: 1fr; }
+      .rooms-grid, .rs-grid { grid-template-columns: 1fr 1fr; }
+      .prop-hdr { flex-direction: column; }
+      .page { padding: 20px 16px; }
+      .hdr { padding: 0 16px; }
+    }
+  </style>
+</head>
+<body>
+<div id="app"></div>
+<input type="file" id="xlsx-input" accept=".xlsx,.xls" style="display:none;">
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+// ============================================================================
+// FILE: index.html (embedded script)
+// PURPOSE: State management, rendering, and event handling for accommodation
+//          tracker. Uses localStorage for persistence; no server required.
+// VERSION: 1.0 | 2026-05-18
+// ============================================================================
+
+const STORE_KEY = 'accom_tracker_v1';
+let orgAuthed = false;
+
+const ROOM_TYPES = [
+  { v: 'master',   l: 'Master' },
+  { v: 'king',     l: 'King' },
+  { v: 'queen',    l: 'Queen' },
+  { v: 'double',   l: 'Double' },
+  { v: 'twin',     l: 'Twin' },
+  { v: 'single',   l: 'Single' },
+  { v: 'sofa-bed', l: 'Sofa bed' },
+  { v: 'bunk',     l: 'Bunk' },
+];
+
+// ── State ────────────────────────────────────────────────────────────────────
+
+let S = load();
+let F = {}; // ephemeral form/modal state
+
+function defaultData() {
+  return { properties: [], members: [], bookings: [], weeklyBudgets: {} };
+}
+
+function defaultUI() {
+  return {
+    view: 'landing',          // 'landing' | 'member' | 'organiser'
+    memberId: null,
+    memTab: 'bookings',       // 'bookings' | 'available' | 'houses' | 'calendar'
+    memHouseWc: null,         // selected W/C in the houses tab (null = first week)
+    memCalYM: null,           // YYYY-MM for calendar view (null = current month)
+    orgTab: 'properties',     // 'properties' | 'budget' | 'members' | 'send'
+    modal: null,              // null | { type, data }
+    expanded: null,           // expanded property id (organiser list)
+    expandedBudgetWk: null,   // expanded W/C in budget tab
+    budgetWcFilter: null,     // W/C filter for summary tiles (null = all)
+    propView: 'name',         // 'name' (flat list) | 'wc' (grouped by week)
+    orgWcExpanded: [],        // W/C keys expanded in the by-week properties view
+    memExpandedWcs: null,     // null = all expanded; array of wc strings that are open
+    sendPropId: null,
+  };
+}
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) return { ...defaultData(), ...defaultUI(), ...JSON.parse(raw) };
+  } catch (_) {}
+  return { ...defaultData(), ...defaultUI() };
+}
+
+function save() {
+  localStorage.setItem(STORE_KEY, JSON.stringify(S));
+}
+
+function set(updates) {
+  S = { ...S, ...updates };
+  save();
+  render();
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+const uid = () => Math.random().toString(36).slice(2, 10);
+
+const prop  = id => S.properties.find(p => p.id === id);
+const mem   = id => S.members.find(m => m.id === id);
+const rtl   = v  => ROOM_TYPES.find(r => r.v === v)?.l || v;
+
+function propBookings(pid)       { return S.bookings.filter(b => b.propertyId === pid); }
+function memBookings(mid)        { return S.bookings.filter(b => b.memberId === mid); }
+function roomBooking(pid, rid)   { return S.bookings.find(b => b.propertyId === pid && b.roomId === rid); }
+function freeRooms(pid) {
+  const p = prop(pid); if (!p) return [];
+  const taken = S.bookings.filter(b => b.propertyId === pid).map(b => b.roomId);
+  return p.rooms.filter(r => !taken.includes(r.id));
+}
+
+function isoDate(d) {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function getMonday(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T12:00:00Z'); // noon UTC — immune to DST
+  const day = d.getUTCDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setUTCDate(d.getUTCDate() + diff);
+  return isoDate(d);
+}
+
+function getMondays2026() {
+  const mondays = [];
+  const d = new Date('2026-01-01T12:00:00Z'); // noon UTC — immune to DST
+  while (d.getUTCDay() !== 1) d.setUTCDate(d.getUTCDate() + 1);
+  while (d.getUTCFullYear() === 2026) {
+    mondays.push(isoDate(d));
+    d.setUTCDate(d.getUTCDate() + 7);
+  }
+  return mondays;
+}
+
+function propWc(p) {
+  return p.wc || getMonday(p.weekStart) || p.weekStart;
+}
+
+function wkNights(wk) {
+  if (!wk.props.length) return 0;
+  const arr = wk.props.map(p => {
+    if (!p.weekStart || !p.weekEnd) return 0;
+    return Math.max(0, Math.round((new Date(p.weekEnd + 'T00:00:00') - new Date(p.weekStart + 'T00:00:00')) / 86400000));
+  });
+  return Math.max(...arr, 0);
+}
+
+function weeks() {
+  const map = {};
+  S.properties.forEach(p => {
+    const wc = propWc(p);
+    if (!map[wc]) map[wc] = { wc, props: [] };
+    map[wc].props.push(p);
+  });
+  return Object.values(map).sort((a, b) => a.wc.localeCompare(b.wc));
+}
+
+function fmtDate(d) {
+  if (!d) return '';
+  return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+function fmtShort(d) {
+  if (!d) return '';
+  return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+function gbp(n) { return '£' + Number(n || 0).toLocaleString('en-GB', { maximumFractionDigits: 0 }); }
+function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ── CRUD ─────────────────────────────────────────────────────────────────────
+
+function addProp(d)    { set({ properties: [...S.properties, { id: uid(), ...d }] }); }
+function updProp(id,d) { set({ properties: S.properties.map(p => p.id === id ? { ...p, ...d } : p) }); }
+function delProp(id) {
+  if (!confirm('Delete this property and all its bookings?')) return;
+  set({ properties: S.properties.filter(p => p.id !== id), bookings: S.bookings.filter(b => b.propertyId !== id) });
+}
+
+function addMem(d)    { set({ members: [...S.members, { id: uid(), ...d }] }); }
+function updMem(id,d) { set({ members: S.members.map(m => m.id === id ? { ...m, ...d } : m) }); }
+function delMem(id) {
+  if (!confirm('Remove this member? Their bookings will also be removed.')) return;
+  set({ members: S.members.filter(m => m.id !== id), bookings: S.bookings.filter(b => b.memberId !== id) });
+}
+
+function book(mid, pid, rid) {
+  if (S.bookings.find(b => b.memberId === mid && b.propertyId === pid)) return;
+  set({ bookings: [...S.bookings, { id: uid(), memberId: mid, propertyId: pid, roomId: rid, at: new Date().toISOString() }] });
+}
+function unbook(bid) {
+  if (!confirm('Remove your booking for this property?')) return;
+  set({ bookings: S.bookings.filter(b => b.id !== bid) });
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+
+function render() {
+  document.getElementById('app').innerHTML =
+    hdr() +
+    (S.view === 'landing'   ? viewLanding() :
+     S.view === 'member'    ? viewMember() :
+     S.view === 'organiser' ? viewOrganiser() : '') +
+    (S.modal ? renderModal() : '');
+  if (S.view === 'organiser' && S.orgTab === 'budget' && !S.modal) renderBudgetChart();
+}
+
+// Header
+function hdr() {
+  const user = S.view === 'member'    ? (mem(S.memberId)?.name || 'Team member') :
+               S.view === 'organiser' ? 'Organiser' : '';
+  return `<header class="hdr">
+    <div class="hdr-logo"><div class="hdr-bar"></div>Accommodation tracker</div>
+    <div class="hdr-right">
+      ${user ? `<span class="hdr-role">${esc(user)}</span>` : ''}
+      ${S.view !== 'landing' ? `<button class="btn btn-outline-lt btn-sm" data-a="landing">Switch view</button>` : ''}
+    </div>
+  </header>`;
+}
+
+// ── Landing ───────────────────────────────────────────────────────────────────
+
+function viewLanding() {
+  return `<div class="landing"><div class="landing-inner">
+    <div class="landing-title">BAE Air accommodation</div>
+    <div class="landing-sub">Newton Europe — project accommodation tracker</div>
+    <div class="role-grid">
+      <div class="role-card" data-a="go-member">
+        <div class="role-icon">&#128100;</div>
+        <div class="role-title">Team member</div>
+        <div class="role-desc">Find accommodation, sign up to a property and see who you are staying with</div>
+      </div>
+      <div class="role-card" data-a="go-organiser">
+        <div class="role-icon">&#128203;</div>
+        <div class="role-title">Organiser</div>
+        <div class="role-desc">Manage properties, track budget and send details to the team</div>
+      </div>
+    </div>
+  </div></div>`;
+}
+
+// ── Member view ───────────────────────────────────────────────────────────────
+
+function viewMember() {
+  if (!S.memberId) return memSelect();
+  const m = mem(S.memberId);
+  if (!m) return memSelect();
+  return `<div class="page">
+    <div class="page-hdr">
+      <div>
+        <div class="page-title">Hello, ${esc(m.name)}</div>
+        <div class="page-sub">View your bookings or find accommodation for a project week</div>
+      </div>
+      <button class="btn btn-outline btn-sm" data-a="change-mem">Change name</button>
+    </div>
+    <div class="tabs">
+      <div class="tab ${S.memTab==='calendar'?'active':''}"   data-a="mem-tab" data-tab="calendar">Calendar</div>
+      <div class="tab ${S.memTab==='bookings'?'active':''}"   data-a="mem-tab" data-tab="bookings">My bookings</div>
+      <div class="tab ${S.memTab==='available'?'active':''}"  data-a="mem-tab" data-tab="available">Find accommodation</div>
+      <div class="tab ${S.memTab==='houses'?'active':''}"     data-a="mem-tab" data-tab="houses">Who's where</div>
+    </div>
+    ${S.memTab === 'calendar' ? memCalView(m) : S.memTab === 'bookings' ? memBookingsView(m) : S.memTab === 'houses' ? memHousesView(m) : memAvailView(m)}
+  </div>`;
+}
+
+function memSelect() {
+  const addMode = S.memAddMode || false;
+  const existingList = S.members.length > 0 ? `
+    <div class="fg">
+      <label>Your name</label>
+      <select id="mem-sel">
+        <option value="">Choose...</option>
+        ${S.members.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}
+      </select>
+    </div>
+    <button class="btn btn-primary" style="width:100%;margin-bottom:8px;" data-a="confirm-mem">Continue</button>
+    <div style="display:flex;align-items:center;gap:10px;margin:12px 0;">
+      <hr style="flex:1;border:none;border-top:1px solid var(--border);">
+      <span style="font-size:12px;color:var(--text-muted);">or</span>
+      <hr style="flex:1;border:none;border-top:1px solid var(--border);">
+    </div>
+  ` : '';
+
+  const addForm = addMode ? `
+    <div style="background:#f9fafb;border:1px solid var(--border);border-radius:var(--card-r);padding:16px;margin-bottom:10px;">
+      <div style="font-size:13px;font-weight:600;margin-bottom:12px;">Add yourself</div>
+      <div class="fg"><label>Full name</label><input type="text" id="self-name" placeholder="e.g. Alice Johnson" autofocus></div>
+      <div class="fg"><label>Email address (optional)</label><input type="email" id="self-email" placeholder="alice.johnson@newton-europe.com"></div>
+      <button class="btn btn-primary" style="width:100%;margin-bottom:6px;" data-a="add-self">Add and continue</button>
+      <button class="btn btn-outline"  style="width:100%;" data-a="toggle-add-self">Cancel</button>
+    </div>
+  ` : `<button class="btn btn-outline" style="width:100%;margin-bottom:8px;" data-a="toggle-add-self">Not listed? Add yourself</button>`;
+
+  return `<div class="landing"><div class="landing-inner" style="max-width:380px; text-align:left;">
+    <div class="landing-title" style="font-size:20px; text-align:center;">Select your name</div>
+    <div class="landing-sub" style="text-align:center; margin-bottom:24px;">Choose your name to manage your accommodation</div>
+    ${existingList}
+    ${addForm}
+    <button class="btn btn-outline" style="width:100%;" data-a="landing">Back</button>
+  </div></div>`;
+}
+
+function memBookingsView(m) {
+  const bks = memBookings(m.id);
+  if (!bks.length) return `<div class="empty"><div class="empty-title">No bookings yet</div><div class="sm muted">Go to "Find accommodation" to sign up for a property.</div></div>`;
+
+  // Group by W/C
+  const wcMap = {};
+  bks.forEach(b => {
+    const p = prop(b.propertyId); if (!p) return;
+    const wc = propWc(p);
+    if (!wcMap[wc]) wcMap[wc] = [];
+    wcMap[wc].push(b);
+  });
+  const wcs = Object.keys(wcMap).sort();
+
+  return wcs.map(wc => {
+    const cards = wcMap[wc].map(b => {
+      const p = prop(b.propertyId); if (!p) return '';
+      const room = p.rooms.find(r => r.id === b.roomId);
+      const others = propBookings(p.id).filter(x => x.memberId !== m.id).map(x => mem(x.memberId)?.name).filter(Boolean);
+      return `<div class="prop-card">
+        <div class="prop-hdr">
+          <div>
+            <div class="prop-name">${esc(p.name)}</div>
+            <div class="prop-meta">
+              <span>${esc(p.location)}</span>
+              <span>${fmtShort(p.weekStart)} &ndash; ${fmtShort(p.weekEnd)}</span>
+              <span>${p.bedrooms} bed &bull; ${p.bathrooms} bath</span>
+            </div>
+          </div>
+          <div class="prop-acts">
+            ${p.listingLink ? `<a class="btn btn-outline btn-sm" href="${esc(p.listingLink)}" target="_blank" rel="noopener">View listing</a>` : ''}
+            <button class="btn btn-outline btn-sm" data-a="add-to-cal" data-bid="${b.id}">&#128197; Add to calendar</button>
+            <button class="btn btn-danger btn-sm" data-a="unbook" data-bid="${b.id}">Remove booking</button>
+          </div>
+        </div>
+        ${room ? `<div class="info-row"><span class="info-lbl">Your room</span><span>${esc(room.name)} <span class="badge b-grey">${rtl(room.type)}</span></span></div>` : ''}
+        <div class="info-row">
+          <span class="info-lbl">Staying with</span>
+          ${others.length ? `<div class="roommates">${others.map(n=>`<span class="rtag">${esc(n)}</span>`).join('')}</div>` : '<span class="muted sm">No other team members booked yet</span>'}
+        </div>
+        ${p.notes ? `<div class="info-row"><span class="info-lbl">Notes</span><span class="sm muted">${esc(p.notes)}</span></div>` : ''}
+      </div>`;
+    }).join('');
+    return `<div style="margin-bottom:20px;">
+      <div style="font-size:12px;font-weight:600;color:var(--text-muted);padding:6px 0 8px;border-bottom:1px solid var(--border);margin-bottom:10px;">W/C ${fmtDate(wc)}</div>
+      ${cards}
+    </div>`;
+  }).join('');
+}
+
+function memAvailView(m) {
+  if (!S.properties.length) return `<div class="empty"><div class="empty-title">No properties available yet</div><div class="sm muted">The organiser will add properties as they are confirmed.</div></div>`;
+
+  // Group all properties by W/C
+  const wcMap = {};
+  S.properties.forEach(p => {
+    const wc = propWc(p);
+    if (!wcMap[wc]) wcMap[wc] = [];
+    wcMap[wc].push(p);
+  });
+  const today = isoDate(new Date());
+  const allWcs = Object.keys(wcMap).sort();
+  const currentWcs = allWcs.filter(wc => wc >= today);
+  const pastWcs    = allWcs.filter(wc => wc < today);
+
+  // null means all expanded (default); otherwise check array membership
+  const isOpen = wc => S.memExpandedWcs === null || S.memExpandedWcs.includes(wc);
+
+  const renderWc = (wc, past) => {
+    const props      = wcMap[wc];
+    const myBooking  = S.bookings.find(b => b.memberId === m.id && props.some(p => p.id === b.propertyId));
+    const bookedProp = myBooking ? prop(myBooking.propertyId) : null;
+    const open       = isOpen(wc);
+
+    return `<div class="wk-row" style="margin-bottom:12px;${past?'opacity:0.5;':''}">
+      <div class="wk-hdr" style="cursor:pointer;" data-a="mem-toggle-wc" data-wc="${wc}">
+        <div>
+          <div class="wk-lbl" style="${past?'color:var(--text-muted);':''}">W/C ${fmtDate(wc)}${past?' <span class="badge b-grey" style="margin-left:6px;font-size:10px;">Past</span>':''}</div>
+          <div class="sm muted mt8">${props.length} propert${props.length!==1?'ies':'y'}</div>
+        </div>
+        <div class="flex g8" style="align-items:center;">
+          ${bookedProp
+            ? `<span class="badge b-green">Booked &mdash; ${esc(bookedProp.name)}</span>`
+            : `<span class="badge b-grey">Not booked</span>`}
+          <span style="color:var(--text-muted);font-size:13px;">${open?'&#9650;':'&#9660;'}</span>
+        </div>
+      </div>
+      ${open ? props.map(p => {
+        const free     = freeRooms(p.id);
+        const full     = free.length === 0;
+        const isMyProp = myBooking && myBooking.propertyId === p.id;
+        return `<div class="prop-card" style="margin-top:10px;${isMyProp?'border:2px solid var(--success);':''}">
+          <div class="prop-hdr">
+            <div>
+              <div class="prop-name">${esc(p.name)}${isMyProp?` <span class="badge b-green" style="margin-left:6px;">Your booking</span>`:''}</div>
+              <div class="prop-meta">
+                <span>${esc(p.location)}</span>
+                <span>${fmtShort(p.weekStart)} &ndash; ${fmtShort(p.weekEnd)}</span>
+                <span>${p.bedrooms} bed &bull; ${p.bathrooms} bath</span>
+              </div>
+            </div>
+            <div class="prop-acts">
+              ${p.listingLink ? `<a class="btn btn-outline btn-sm" href="${esc(p.listingLink)}" target="_blank" rel="noopener">View listing</a>` : ''}
+              ${past ? '' : isMyProp
+                ? `<button class="btn btn-danger btn-sm" data-a="unbook" data-bid="${myBooking.id}">Remove booking</button>`
+                : full
+                  ? `<span class="badge b-red">Full</span>`
+                  : ''}
+            </div>
+          </div>
+          ${!past ? `<div class="sm muted" style="margin:4px 0 8px;">Click an available room to book it</div>` : ''}
+          <div class="rooms-grid">
+            ${p.rooms.map(r => {
+              const bk  = roomBooking(p.id, r.id);
+              const who = bk ? mem(bk.memberId) : null;
+              const me  = bk && bk.memberId === m.id;
+              const clickable = !past && !who;
+              return `<div class="room-chip ${me?'me':who?'taken':'avail'}" ${clickable?`data-a="quick-book" data-pid="${p.id}" data-rid="${r.id}" style="cursor:pointer;" title="Book this room"`:''}>
+                <div class="rc-name">${esc(r.name)}</div>
+                <div class="rc-type">${rtl(r.type)}</div>
+                <div class="rc-who ${me?'taken':who?'taken':'avail'}">${me?'You':who?esc(who.name):'Available'}</div>
+              </div>`;
+            }).join('')}
+          </div>
+          ${p.notes ? `<div class="sm muted mt8">${esc(p.notes)}</div>` : ''}
+        </div>`;
+      }).join('') : ''}
+    </div>`;
+  };
+
+  const currentHtml = currentWcs.map(wc => renderWc(wc, false)).join('');
+  const pastHtml    = pastWcs.map(wc => renderWc(wc, true)).join('');
+
+  return currentHtml
+    + (pastWcs.length ? `<div class="sec-title" style="margin-top:24px;color:var(--text-muted);">Past weeks</div>${pastHtml}` : '');
+}
+
+function memCalView(m) {
+  const today  = isoDate(new Date());
+  const curYM  = S.memCalYM || today.slice(0, 7);
+  const [year, month] = curYM.split('-').map(Number);
+
+  const firstDay   = new Date(Date.UTC(year, month - 1, 1));
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  let startDow = firstDay.getUTCDay();
+  startDow = startDow === 0 ? 6 : startDow - 1; // Mon = 0
+
+  const bks = memBookings(m.id);
+  const ranges = bks.map(b => {
+    const p = prop(b.propertyId);
+    return p ? { start: p.weekStart || '', end: p.weekEnd || '', name: p.name, bid: b.id, p } : null;
+  }).filter(Boolean);
+
+  const monthTitle = firstDay.toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+
+  const DAY_HDRS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
+    .map(d => `<div class="cal-hdr">${d}</div>`).join('');
+
+  const blanks = Array(startDow).fill('<div class="cal-cell"></div>').join('');
+
+  const cells = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds    = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const isToday  = ds === today;
+    const ranges_hit = ranges.filter(r => r.start <= ds && ds <= r.end);
+    const booked     = ranges_hit.length > 0;
+    const isStart    = ranges_hit.some(r => r.start === ds);
+    const isEnd      = ranges_hit.some(r => r.end === ds);
+
+    let rangeDiv = '';
+    if (booked) {
+      const cls = (isStart && isEnd) ? '' : isStart ? 'rs' : isEnd ? 're' : 'rm';
+      if (cls) rangeDiv = `<div class="cal-range ${cls}"></div>`;
+    }
+
+    cells.push(`<div class="cal-cell ${booked?'booked':''} ${isToday?'is-today':''}">
+      ${rangeDiv}
+      <div class="cal-num">${d}</div>
+    </div>`);
+  }
+
+  // Bookings that overlap this month
+  const monthStart = `${curYM}-01`;
+  const monthEnd   = `${curYM}-${String(daysInMonth).padStart(2,'0')}`;
+  const monthBks   = bks.filter(b => {
+    const p = prop(b.propertyId); if (!p) return false;
+    return (p.weekStart || '') <= monthEnd && (p.weekEnd || '') >= monthStart;
+  });
+
+  const bookingList = !monthBks.length
+    ? `<div class="sm muted" style="padding:16px 0;text-align:center;">No bookings this month</div>`
+    : monthBks.map(b => {
+        const p = prop(b.propertyId); if (!p) return '';
+        const room = p.rooms.find(r => r.id === b.roomId);
+        const others = propBookings(p.id).filter(x => x.memberId !== m.id).map(x => mem(x.memberId)?.name).filter(Boolean);
+        return `<div class="cal-bk-item">
+          <div class="cal-bk-bar"></div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-weight:600;font-size:14px;margin-bottom:3px;">${esc(p.name)}</div>
+            <div class="sm muted">${fmtShort(p.weekStart)} &ndash; ${fmtShort(p.weekEnd)} &bull; ${esc(p.location)}</div>
+            ${room ? `<div class="sm" style="color:var(--orange);margin-top:2px;">${esc(room.name)} &bull; ${rtl(room.type)}</div>` : ''}
+            ${others.length ? `<div class="sm muted" style="margin-top:2px;">With: ${others.map(esc).join(', ')}</div>` : ''}
+          </div>
+          <div class="flex g6" style="flex-shrink:0;">
+            ${p.listingLink ? `<a class="btn btn-outline btn-sm" href="${esc(p.listingLink)}" target="_blank" rel="noopener">Listing</a>` : ''}
+            <button class="btn btn-outline btn-sm" data-a="add-to-cal" data-bid="${b.id}">&#128197;</button>
+          </div>
+        </div>`;
+      }).join('');
+
+  return `
+    <div class="cal-wrap">
+      <div class="cal-nav">
+        <button class="btn btn-ghost btn-sm" data-a="cal-prev">&#8592;</button>
+        <div class="cal-title">${monthTitle}</div>
+        <button class="btn btn-ghost btn-sm" data-a="cal-next">&#8594;</button>
+      </div>
+      <div class="cal-grid">
+        ${DAY_HDRS}
+        ${blanks}
+        ${cells.join('')}
+      </div>
+    </div>
+    <div class="cal-bk-list">
+      <div class="sec-title" style="margin-bottom:4px;">Bookings this month</div>
+      ${bookingList}
+    </div>`;
+}
+
+function memHousesView(m) {
+  const wks = weeks();
+  if (!wks.length) return `<div class="empty"><div class="empty-title">No properties added yet</div><div class="sm muted">The organiser will add properties as they are confirmed.</div></div>`;
+
+  const activeWc = S.memHouseWc || wks[0].wc;
+  const wk = wks.find(w => w.wc === activeWc) || wks[0];
+
+  const wcOpts = wks.map(w =>
+    `<option value="${w.wc}" ${w.wc === activeWc ? 'selected' : ''}>${fmtDate(w.wc)}</option>`
+  ).join('');
+
+  const sorted = [...wk.props].sort((a, b) => {
+    const aMe = propBookings(a.id).some(bk => bk.memberId === m.id);
+    const bMe = propBookings(b.id).some(bk => bk.memberId === m.id);
+    return aMe === bMe ? 0 : aMe ? -1 : 1;
+  });
+  const cards = sorted.map(p => {
+    const bks     = propBookings(p.id);
+    const myBk    = bks.find(b => b.memberId === m.id);
+    const rooms   = p.rooms.map(r => {
+      const bk  = roomBooking(p.id, r.id);
+      const who = bk ? mem(bk.memberId) : null;
+      const isMe = bk && bk.memberId === m.id;
+      return { r, who, isMe };
+    });
+    const occupancy = bks.length;
+    const capacity  = p.rooms.length;
+
+    return `<div class="prop-card" style="${myBk ? 'border:2px solid var(--success);' : ''}">
+      <div class="prop-hdr">
+        <div>
+          <div class="prop-name">${esc(p.name)} ${myBk ? `<span class="badge b-green" style="margin-left:6px;">You're here</span>` : ''}</div>
+          <div class="prop-meta">
+            <span>${esc(p.location)}</span>
+            <span>${fmtShort(p.weekStart)} &ndash; ${fmtShort(p.weekEnd)}</span>
+            <span>${p.bedrooms} bed &bull; ${p.bathrooms} bath</span>
+          </div>
+        </div>
+        <div class="prop-acts">
+          ${p.listingLink ? `<a class="btn btn-outline btn-sm" href="${esc(p.listingLink)}" target="_blank" rel="noopener">Listing</a>` : ''}
+          <span class="badge ${occupancy===0?'b-grey':occupancy<capacity?'b-orange':'b-red'}">${occupancy}/${capacity} booked</span>
+        </div>
+      </div>
+      <div class="rooms-grid" style="margin-top:14px;">
+        ${rooms.map(({ r, who, isMe }) => `
+          <div class="room-chip ${isMe ? 'me' : who ? 'taken' : 'avail'}">
+            <div class="rc-name">${esc(r.name)}</div>
+            <div class="rc-type">${rtl(r.type)}</div>
+            <div class="rc-who ${isMe ? 'taken' : who ? 'taken' : 'avail'}">${isMe ? 'You' : who ? esc(who.name) : 'Available'}</div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="fb mb16" style="align-items:center;gap:12px;">
+      <div style="font-weight:600;font-size:13px;">W/C</div>
+      <select data-a="mem-house-wc" style="min-width:200px;">
+        ${wcOpts}
+      </select>
+      <span class="badge b-grey">${wk.props.length} propert${wk.props.length!==1?'ies':'y'}</span>
+    </div>
+    ${!wk.props.length
+      ? `<div class="empty"><div class="empty-title">No properties this week</div><div class="sm muted">No accommodation has been arranged for this week yet.</div></div>`
+      : cards}`;
+}
+
+// ── Organiser view ────────────────────────────────────────────────────────────
+
+function viewOrganiser() {
+  if (!orgAuthed) return `<div class="landing"><div class="landing-inner" style="max-width:400px;text-align:left;">
+    <div style="text-align:center;margin-bottom:32px;">
+      <div style="width:56px;height:56px;background:var(--slate);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;">
+        <span style="font-size:24px;">🔒</span>
+      </div>
+      <div class="landing-title" style="font-size:24px;margin-bottom:6px;">Organiser access</div>
+      <div style="color:var(--text-muted);font-size:14px;">This area is restricted to organisers only.</div>
+    </div>
+    <div style="background:var(--white);border:1px solid var(--border);border-radius:var(--card-r);padding:28px;box-shadow:var(--shadow-sm);">
+      <div class="fg" style="margin-bottom:20px;">
+        <label>Password</label>
+        <input type="password" id="org-pw" placeholder="Enter password" style="font-size:15px;padding:12px 14px;letter-spacing:0.1em;"
+          onkeydown="if(event.key==='Enter')document.querySelector('[data-a=org-login]').click()">
+      </div>
+      <div id="org-pw-err" style="color:var(--danger);font-size:12px;margin-bottom:16px;display:none;padding:10px 12px;background:var(--danger-bg);border-radius:6px;">
+        Incorrect password — please try again.
+      </div>
+      <button class="btn btn-primary" style="width:100%;padding:12px;font-size:14px;justify-content:center;" data-a="org-login">Continue</button>
+    </div>
+    <button class="btn btn-ghost" style="width:100%;margin-top:12px;justify-content:center;" data-a="landing">&#8592; Back to home</button>
+  </div></div>`;
+  return `<div class="page">
+    <div class="page-hdr">
+      <div>
+        <div class="page-title">Organiser dashboard</div>
+        <div class="page-sub">Manage properties, budget and team members</div>
+      </div>
+    </div>
+    <div class="tabs">
+      <div class="tab ${S.orgTab==='properties'?'active':''}" data-a="org-tab" data-tab="properties">Properties</div>
+      <div class="tab ${S.orgTab==='budget'?'active':''}"     data-a="org-tab" data-tab="budget">Budget</div>
+      <div class="tab ${S.orgTab==='members'?'active':''}"    data-a="org-tab" data-tab="members">Members</div>
+      <div class="tab ${S.orgTab==='send'?'active':''}"       data-a="org-tab" data-tab="send">Send details</div>
+    </div>
+    ${S.orgTab==='properties' ? orgProps() :
+      S.orgTab==='budget'     ? orgBudget() :
+      S.orgTab==='members'    ? orgMembers() :
+      orgSend()}
+  </div>`;
+}
+
+// Properties tab
+function orgProps() {
+  const byName = S.propView !== 'wc';
+
+  const toggle = `<div class="flex g4" style="border:1px solid var(--border);border-radius:4px;padding:3px;">
+    <button class="btn btn-xs ${byName?'btn-primary':'btn-ghost'}" data-a="prop-view" data-view="name" style="padding:4px 10px;">By name</button>
+    <button class="btn btn-xs ${!byName?'btn-primary':'btn-ghost'}" data-a="prop-view" data-view="wc" style="padding:4px 10px;">By week</button>
+  </div>`;
+
+  const toolbar = `<div class="fb mb16">
+    <div class="flex g8">
+      ${toggle}
+      <button class="btn btn-outline" data-a="import-excel">&#8593; Import from Excel</button>
+      <button class="btn btn-outline" data-a="download-sample">&#8595; Download sample</button>
+    </div>
+    <button class="btn btn-primary" data-a="open-add-prop">+ Add property</button>
+  </div>`;
+
+  if (!S.properties.length) return toolbar + `<div class="empty"><div class="empty-title">No properties added yet</div><div class="sm muted">Add your first property to get started.</div></div>`;
+
+  if (byName) {
+    const sorted = [...S.properties].sort((a, b) => a.name.localeCompare(b.name));
+    return toolbar + sorted.map(p => orgPropCard(p)).join('');
+  }
+
+  // Group by W/C
+  const today = isoDate(new Date());
+  const wcMap = {};
+  S.properties.forEach(p => {
+    const wc = propWc(p);
+    if (!wcMap[wc]) wcMap[wc] = [];
+    wcMap[wc].push(p);
+  });
+  const currentWcs = Object.keys(wcMap).filter(wc => wc >= today).sort();
+  const pastWcs    = Object.keys(wcMap).filter(wc => wc < today).sort();
+
+  const orgWcOpen = wc => (S.orgWcExpanded || []).includes(wc);
+  const renderGroup = (wc, past) => {
+    const props = wcMap[wc];
+    const totalBooked = props.reduce((s, p) => s + propBookings(p.id).length, 0);
+    const totalRooms  = props.reduce((s, p) => s + p.rooms.length, 0);
+    const open = orgWcOpen(wc);
+    return `<div style="${past ? 'opacity:0.5;' : ''}margin-bottom:8px;">
+      <div class="wk-hdr" style="cursor:pointer;margin-bottom:${open?'10px':'0'};" data-a="org-prop-toggle-wc" data-wc="${wc}">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:13px;font-weight:600;">W/C ${fmtDate(wc)}</span>
+          ${past ? `<span class="badge b-grey" style="font-size:10px;">Past</span>` : ''}
+          <span class="badge b-grey">${props.length} propert${props.length!==1?'ies':'y'}</span>
+          <span class="badge ${totalBooked===0?'b-grey':totalBooked<totalRooms?'b-orange':'b-green'}">${totalBooked}/${totalRooms} booked</span>
+        </div>
+        <span style="color:var(--text-muted);font-size:13px;">${open?'&#9650;':'&#9660;'}</span>
+      </div>
+      ${open ? props.map(p => orgPropCard(p)).join('') : ''}
+    </div>`;
+  };
+
+  return toolbar
+    + currentWcs.map(wc => renderGroup(wc, false)).join('')
+    + (pastWcs.length ? `<div class="sec-title" style="margin-top:8px;color:var(--text-muted);">Past weeks</div>` + pastWcs.map(wc => renderGroup(wc, true)).join('') : '');
+}
+
+function orgPropCard(p) {
+  const bks  = propBookings(p.id);
+  const exp  = S.expanded === p.id;
+  const full = bks.length === p.rooms.length;
+  return `<div class="prop-card">
+    <div class="prop-hdr">
+      <div style="flex:1;cursor:pointer;" data-a="toggle-prop" data-pid="${p.id}">
+        <div class="prop-name">${esc(p.name)}</div>
+        <div class="prop-meta">
+          <span>${esc(p.location)}</span>
+          <span>${fmtShort(p.weekStart)} &ndash; ${fmtShort(p.weekEnd)}</span>
+          <span>${p.bedrooms} bed &bull; ${p.bathrooms} bath</span>
+          <span>${gbp(p.totalPrice)}</span>
+          <span class="badge ${full ? 'b-red' : bks.length ? 'b-orange' : 'b-grey'}">${bks.length} / ${p.rooms.length} booked</span>
+        </div>
+      </div>
+      <div class="prop-acts">
+        ${p.listingLink ? `<a class="btn btn-outline btn-sm" href="${esc(p.listingLink)}" target="_blank" rel="noopener">Listing</a>` : ''}
+        <button class="btn btn-outline btn-sm" data-a="open-edit-prop" data-pid="${p.id}">Edit</button>
+        <button class="btn btn-outline btn-sm" data-a="dup-prop"       data-pid="${p.id}">Duplicate</button>
+        <button class="btn btn-danger btn-sm"  data-a="del-prop"       data-pid="${p.id}">Delete</button>
+      </div>
+    </div>
+    ${exp ? `<hr class="divider">
+      <div class="sec-title">Room assignments</div>
+      ${!S.members.length ? `<div class="sm muted">Add members first before assigning rooms.</div>` :
+        p.rooms.length ? p.rooms.map(r => {
+          const bk         = roomBooking(p.id, r.id);
+          const assignedId = bk ? bk.memberId : '';
+          const memberOpts = S.members.map(m =>
+            `<option value="${m.id}" ${m.id === assignedId ? 'selected' : ''}>${esc(m.name)}</option>`
+          ).join('');
+          return `<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);">
+            <div style="flex:1;">
+              <div style="font-weight:600;font-size:13px;">${esc(r.name)}</div>
+              <div class="sm muted">${rtl(r.type)}</div>
+            </div>
+            <select data-a="assign-room" data-pid="${p.id}" data-rid="${r.id}" style="width:210px;">
+              <option value="">— Unassigned —</option>
+              ${memberOpts}
+            </select>
+          </div>`;
+        }).join('') : `<div class="sm muted">No rooms added to this property yet.</div>`}
+      ${p.notes ? `<div class="sm muted mt12"><strong>Notes:</strong> ${esc(p.notes)}</div>` : ''}
+    ` : ''}
+  </div>`;
+}
+
+// Budget tab
+function orgBudget() {
+  const wks      = weeks();
+
+  const wkData = wks.map(wk => {
+    const signups    = S.bookings.filter(b => wk.props.some(p => p.id === b.propertyId)).length;
+    const cap        = wk.props.reduce((s, p) => s + p.rooms.length, 0);
+    const nights     = wkNights(wk);
+    const effNights  = Math.min(nights, 3);
+    const entitlement = 175 * signups * effNights;
+    const cost       = wk.props.reduce((s, p) => s + (Number(p.totalPrice) || 0), 0);
+    return { wk, signups, cap, nights, effNights, entitlement, cost };
+  });
+
+  // Summary tiles — scoped to selected W/C filter or all weeks
+  const filtered = S.budgetWcFilter ? wkData.filter(d => d.wk.wc === S.budgetWcFilter) : wkData;
+  const tileProps    = S.budgetWcFilter ? S.properties.filter(p => propWc(p) === S.budgetWcFilter) : S.properties;
+  const tileCost     = filtered.reduce((s, d) => s + d.cost, 0);
+  const tileEnt      = filtered.reduce((s, d) => s + d.entitlement, 0);
+  const tileLeft     = tileEnt - tileCost;
+  const tileEntOverSpendPct = tileCost > 0 ? Math.round(tileEnt / tileCost * 100) : null;
+  const tileSignups  = filtered.reduce((s, d) => s + d.signups, 0);
+  const tileCap      = filtered.reduce((s, d) => s + d.cap, 0);
+  const tileOccPct   = tileCap > 0 ? Math.round(tileSignups / tileCap * 100) : 0;
+
+  const filterOpts = wks.map(wk =>
+    `<option value="${wk.wc}" ${S.budgetWcFilter===wk.wc?'selected':''}>W/C ${fmtDate(wk.wc)}</option>`
+  ).join('');
+
+  return `
+  <div class="fb mb16" style="align-items:center;">
+    <div class="sm" style="font-weight:600;color:var(--text-muted);">Filter by week</div>
+    <select data-a="budget-wc-filter" style="min-width:200px;">
+      <option value="">All weeks</option>
+      ${filterOpts}
+    </select>
+  </div>
+  <div class="stat-grid">
+    <div class="stat"><div class="stat-lbl">Total entitlement</div><div class="stat-val">${gbp(tileEnt)}</div><div class="stat-hint">£175 × people × nights (max 3)</div></div>
+    <div class="stat"><div class="stat-lbl">Committed spend</div><div class="stat-val" style="color:var(--orange)">${gbp(tileCost)}</div><div class="stat-hint">${tileProps.length} propert${tileProps.length!==1?'ies':'y'}</div></div>
+<div class="stat"><div class="stat-lbl">Entitlement vs spend</div><div class="stat-val" style="color:${tileEntOverSpendPct===null?'inherit':tileEntOverSpendPct<100?'var(--danger)':tileEntOverSpendPct<120?'var(--orange)':'var(--success)'}">${tileEntOverSpendPct===null?'—':tileEntOverSpendPct+'%'}</div><div class="stat-hint">${gbp(tileEnt)} entitlement / ${gbp(tileCost)} spend</div></div>
+    <div class="stat"><div class="stat-lbl">Beds occupied</div><div class="stat-val">${tileSignups}<span style="font-size:16px;font-weight:400;color:var(--text-muted)"> / ${tileCap}</span></div><div class="stat-hint">${tileOccPct}% occupancy</div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:20px;padding:20px;">
+    <div style="font-size:13px;font-weight:600;margin-bottom:16px;">Spend vs entitlement — 19-week view</div>
+    <div style="position:relative;height:300px;">
+      <canvas id="budget-chart"></canvas>
+    </div>
+  </div>
+
+  <div class="sec-title">Weekly breakdown</div>
+  ${!wks.length ? `<div class="empty"><div class="empty-title">No properties added yet</div><div class="sm muted">Add properties with a W/C date to see the weekly budget breakdown.</div></div>` :
+    wkData.map(({ wk, signups, cap, nights, effNights, entitlement, cost }) => {
+      const left   = entitlement - cost;
+      const pct    = cost > 0 ? Math.min(100, entitlement / cost * 100) : 0;
+      const exp    = S.expandedBudgetWk === wk.wc;
+      const occPct = cap > 0 ? (signups / cap * 100) : 0;
+      return `<div class="wk-row">
+        <div class="wk-hdr" style="cursor:pointer;" data-a="toggle-budget-wk" data-wc="${wk.wc}">
+          <div>
+            <div class="wk-lbl">W/C ${fmtDate(wk.wc)}</div>
+            <div class="sm muted mt8">${nights} night${nights!==1?'s':''} &bull; ${signups} signed up &bull; Entitlement: <strong>${gbp(entitlement)}</strong></div>
+          </div>
+          <div class="flex g8" style="align-items:center;">
+            <span class="badge b-grey">${wk.props.length} propert${wk.props.length!==1?'ies':'y'}</span>
+            <span class="badge ${signups===0?'b-grey':signups<cap?'b-orange':'b-green'}">${signups}/${cap}</span>
+            <span style="color:var(--text-muted);font-size:13px;">${exp?'&#9650;':'&#9660;'}</span>
+          </div>
+        </div>
+        <div class="wk-meta mt8">
+          <span>Entitlement: ${gbp(entitlement)} &nbsp;<span class="muted">(£175 &times; ${signups} &times; ${effNights} night${effNights!==1?'s':''})</span></span>
+          <span>Property cost: ${gbp(cost)}</span>
+          <span style="color:${left<0?'var(--danger)':'var(--success)'};">${left>=0?'Under by '+gbp(left):'Over by '+gbp(-left)}</span>
+          ${signups&&cost?`<span>Cost per person: ${gbp(cost/signups)}</span>`:''}
+        </div>
+        ${entitlement>0||cost>0 ? `<div class="prog mt8"><div class="prog-fill ${pct>=100?'pf-green':pct>=75?'':'pf-red'}" style="width:${Math.min(pct,100)}%"></div></div>` : ''}
+        ${exp ? `
+          <hr class="divider">
+          <div style="font-size:12px;font-weight:600;margin-bottom:10px;">Properties this week</div>
+          ${!wk.props.length ? `<div class="sm muted">No properties assigned to this week.</div>` :
+            wk.props.map(p => {
+              const pb = propBookings(p.id).length;
+              return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);">
+                <div>
+                  <div style="font-weight:600;font-size:13px;">${esc(p.name)}</div>
+                  <div class="sm muted">${esc(p.location)} &bull; ${fmtShort(p.weekStart)}&ndash;${fmtShort(p.weekEnd)} &bull; ${gbp(p.totalPrice)} &bull; ${pb}/${p.rooms.length} booked</div>
+                </div>
+                <div class="flex g6">
+                  ${p.listingLink?`<a class="btn btn-outline btn-xs" href="${esc(p.listingLink)}" target="_blank" rel="noopener">Listing</a>`:''}
+                  <button class="btn btn-outline btn-xs" data-a="open-edit-prop" data-pid="${p.id}">Edit</button>
+                </div>
+              </div>`;
+            }).join('')}
+        ` : ''}
+      </div>`;
+    }).join('')}`;
+}
+
+// Members tab
+function orgMembers() {
+  return `<div class="fb mb16">
+    <div></div>
+    <button class="btn btn-primary" data-a="open-add-mem">+ Add member</button>
+  </div>
+  ${!S.members.length ? `<div class="empty"><div class="empty-title">No members added yet</div><div class="sm muted">Add team members so they can sign up for accommodation.</div></div>` : `
+  <div class="card">
+    ${S.members.map(m => {
+      const bks = memBookings(m.id);
+      const booked = bks.map(b => { const p=prop(b.propertyId); return p?`${esc(p.name)}${p.wc?` (W/C ${fmtDate(p.wc)})`:''}`:''; }).filter(Boolean);
+      return `<div class="mem-row">
+        <div style="flex:1;">
+          <div class="mem-name">${esc(m.name)}</div>
+          <div class="mem-email">${esc(m.email||'No email')}</div>
+          ${booked.length ? `<div class="mem-booked">Booked: ${booked.join(', ')}</div>` : ''}
+        </div>
+        <div class="flex g8">
+          <button class="btn btn-outline btn-sm" data-a="open-edit-mem" data-mid="${m.id}">Edit</button>
+          <button class="btn btn-danger btn-sm"  data-a="del-mem"       data-mid="${m.id}">Remove</button>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`}`;
+}
+
+// Send details tab
+function orgSend() {
+  if (!S.properties.length) return `<div class="empty"><div class="empty-title">No properties added</div><div class="sm muted">Add properties first to send details to team members.</div></div>`;
+  const selId = S.sendPropId || S.properties[0]?.id;
+  const p = prop(selId); if (!p) return '';
+  const bks = propBookings(selId);
+  const booked = bks.map(b => ({ m: mem(b.memberId), r: p.rooms.find(x=>x.id===b.roomId) })).filter(x=>x.m);
+  const emailBody = genEmail(p, booked);
+
+  return `<div class="card mb16">
+    <div class="card-hdr"><div class="card-title">Select property</div></div>
+    <div class="fg">
+      <label>Property</label>
+      <select data-a="sel-send-prop">
+        ${S.properties.map(pr=>`<option value="${pr.id}" ${pr.id===selId?'selected':''}>${esc(pr.name)} (${fmtShort(pr.weekStart)} &ndash; ${fmtShort(pr.weekEnd)})</option>`).join('')}
+      </select>
+    </div>
+  </div>
+  <div class="card mb16">
+    <div class="card-hdr">
+      <div>
+        <div class="card-title">${esc(p.name)}</div>
+        <div class="card-sub">${booked.length} team member${booked.length!==1?'s':''} booked</div>
+      </div>
+    </div>
+    ${!booked.length ? `<div class="sm muted">No team members have signed up for this property yet.</div>` : `
+    <table>
+      <thead><tr><th>Name</th><th>Room</th><th>Email</th></tr></thead>
+      <tbody>
+        ${booked.map(({m,r})=>`<tr><td>${esc(m.name)}</td><td>${r?`${esc(r.name)} (${rtl(r.type)})`:'—'}</td><td>${esc(m.email||'—')}</td></tr>`).join('')}
+      </tbody>
+    </table>`}
+  </div>
+  <div class="card">
+    <div class="card-hdr">
+      <div class="card-title">Email preview</div>
+      ${booked.length ? `<button class="btn btn-primary btn-sm" data-a="send-emails" data-pid="${selId}">Open in email client</button>` : ''}
+    </div>
+    <div class="email-pre">${esc(emailBody)}</div>
+  </div>`;
+}
+
+function genEmail(p, booked) {
+  const lines = [
+    `Subject: Accommodation details — ${p.name}`,
+    '',
+    `Hi [name],`,
+    '',
+    `Here are the details for your accommodation during the week of ${fmtShort(p.weekStart)} to ${fmtDate(p.weekEnd)}.`,
+    '',
+    `Property:   ${p.name}`,
+    `Location:   ${p.location}`,
+    `Dates:      ${fmtDate(p.weekStart)} to ${fmtDate(p.weekEnd)}`,
+    `Bedrooms:   ${p.bedrooms}`,
+    `Bathrooms:  ${p.bathrooms}`,
+    p.listingLink ? `Listing:    ${p.listingLink}` : '',
+    p.notes       ? `Notes:      ${p.notes}`       : '',
+    '',
+    `Who is staying:`,
+    ...booked.map(({m,r}) => `  - ${m.name}${r ? ` — ${r.name} (${rtl(r.type)})` : ''}`),
+    '',
+    `Please confirm you have seen this and contact the organiser if you have any questions.`,
+    '',
+    `Thanks,`,
+    `Accommodation team`,
+  ].filter(l => l !== null && l !== undefined);
+  return lines.join('\n');
+}
+
+// ── Modals ────────────────────────────────────────────────────────────────────
+
+function renderModal() {
+  const { type, data } = S.modal;
+  let inner = '';
+  if (type === 'add-prop' || type === 'edit-prop') inner = modalProp(type, data);
+  else if (type === 'add-mem' || type === 'edit-mem') inner = modalMem(type, data);
+  else if (type === 'signup') inner = modalSignup(data);
+  else if (type === 'import-confirm') inner = modalImportConfirm(data);
+  return `<div class="overlay" data-a="overlay-close"><div class="modal">${inner}</div></div>`;
+}
+
+function modalProp(type, data) {
+  const p    = data?.p || {};
+  const isEd = type === 'edit-prop';
+  const rooms = F.rooms || p.rooms || [];
+  const roomsOpts = ROOM_TYPES.map(rt => `<option value="${rt.v}">${rt.l}</option>`).join('');
+  return `
+  <div class="modal-hdr">
+    <div class="modal-title">${isEd ? 'Edit property' : 'Add property'}</div>
+    <button class="modal-close" data-a="close-modal">&times;</button>
+  </div>
+  <div class="frow frow-2">
+    <div class="fg"><label>Property name</label><input type="text" id="p-name" value="${esc(p.name||'')}" placeholder="e.g. The Lune Valley House"></div>
+    <div class="fg"><label>Location</label><input type="text" id="p-loc" value="${esc(p.location||'')}" placeholder="e.g. Lancaster, Lancashire"></div>
+  </div>
+  <div class="fg"><label>Listing link (Airbnb / VRBO URL)</label><input type="url" id="p-link" value="${esc(p.listingLink||'')}" placeholder="https://airbnb.com/rooms/..."></div>
+  <div class="frow frow-3">
+    <div class="fg"><label>Week commencing (W/C)</label>
+      <select id="p-wc">
+        <option value="">Select week...</option>
+        ${(()=>{ const now=getMonday(new Date().toISOString().split('T')[0]); return getMondays2026().map(m => `<option value="${m}" ${p.wc===m?'selected':''} ${m===now?'style="background:#f3f4f6;"':''}>${fmtDate(m)}${m===now?' — this week':''}</option>`).join(''); })()}
+      </select>
+    </div>
+    <div class="fg"><label>Week start</label><input type="date" id="p-ws" value="${p.weekStart||''}"></div>
+    <div class="fg"><label>Week end</label><input type="date" id="p-we" value="${p.weekEnd||''}"></div>
+  </div>
+  <div class="frow frow-3">
+    <div class="fg"><label>Bedrooms</label><input type="number" id="p-beds" value="${p.bedrooms||''}" min="0" placeholder="4"></div>
+    <div class="fg"><label>Bathrooms</label><input type="number" id="p-baths" value="${p.bathrooms||''}" min="0" placeholder="2"></div>
+    <div class="fg"><label>Total price for stay (£)</label><input type="number" id="p-price" value="${p.totalPrice||''}" min="0" placeholder="1200"></div>
+  </div>
+  <div class="fg"><label>Notes</label><textarea id="p-notes" placeholder="Access details, distance from site...">${esc(p.notes||'')}</textarea></div>
+  <hr class="divider">
+  <div class="fb mb12">
+    <div class="fw6" style="font-size:13px;">Rooms</div>
+    <button class="btn btn-outline btn-sm" data-a="add-room">+ Add room</button>
+  </div>
+  <div id="rooms-ed">
+    ${rooms.map((r,i) => reRow(r, i, roomsOpts)).join('')}
+  </div>
+  ${!rooms.length ? `<div class="sm muted mb12">No rooms added. Click "+ Add room" to add bedrooms.</div>` : ''}
+  <div class="modal-foot">
+    <button class="btn btn-outline" data-a="close-modal">Cancel</button>
+    <button class="btn btn-primary" data-a="${isEd?'save-edit-prop':'save-add-prop'}" data-pid="${esc(p.id||'')}">${isEd?'Save changes':'Add property'}</button>
+  </div>`;
+}
+
+function reRow(r, i, roomsOpts) {
+  const opts = roomsOpts || ROOM_TYPES.map(rt => `<option value="${rt.v}">${rt.l}</option>`).join('');
+  return `<div class="re-row" data-ri="${i}">
+    <div class="fg" style="flex:2;"><label>Room name</label><input type="text" class="rn" value="${esc(r.name||'')}" placeholder="e.g. Master bedroom" data-i="${i}"></div>
+    <div class="fg" style="flex:1;"><label>Bed type</label>
+      <select class="rt" data-i="${i}">${opts.replace(`value="${r.type}"`, `value="${r.type}" selected`)}</select>
+    </div>
+    <div style="padding-bottom:1px;">
+      <button class="btn btn-danger btn-xs" data-a="rm-room" data-i="${i}" style="margin-top:19px;">&times;</button>
+    </div>
+  </div>`;
+}
+
+function modalMem(type, data) {
+  const m    = data?.m || {};
+  const isEd = type === 'edit-mem';
+  return `
+  <div class="modal-hdr">
+    <div class="modal-title">${isEd ? 'Edit member' : 'Add member'}</div>
+    <button class="modal-close" data-a="close-modal">&times;</button>
+  </div>
+  <div class="fg"><label>Full name</label><input type="text" id="m-name" value="${esc(m.name||'')}" placeholder="e.g. Alice Johnson"></div>
+  <div class="fg"><label>Email address</label><input type="email" id="m-email" value="${esc(m.email||'')}" placeholder="alice.johnson@newton-europe.com"></div>
+  <div class="modal-foot">
+    <button class="btn btn-outline" data-a="close-modal">Cancel</button>
+    <button class="btn btn-primary" data-a="${isEd?'save-edit-mem':'save-add-mem'}" data-mid="${esc(m.id||'')}">${isEd?'Save changes':'Add member'}</button>
+  </div>`;
+}
+
+function modalSignup(data) {
+  const p   = prop(data.pid); if (!p) return '';
+  const m   = mem(S.memberId); if (!m) return '';
+  const fr  = freeRooms(data.pid);
+  const occ = propBookings(data.pid).map(b => mem(b.memberId)?.name).filter(Boolean);
+  const sel = F.roomId;
+
+  return `
+  <div class="modal-hdr">
+    <div class="modal-title">Sign up for ${esc(p.name)}</div>
+    <button class="modal-close" data-a="close-modal">&times;</button>
+  </div>
+  <div class="sm muted">${esc(p.location)} &bull; ${fmtShort(p.weekStart)} &ndash; ${fmtDate(p.weekEnd)}</div>
+  ${p.listingLink ? `<a class="btn btn-outline btn-sm mt8" href="${esc(p.listingLink)}" target="_blank" rel="noopener">View listing</a>` : ''}
+  ${occ.length ? `<div class="alert alert-info mt12"><strong>Already signed up:</strong> ${occ.map(esc).join(', ')}</div>` : ''}
+  <hr class="divider">
+  <div class="fw6 mb12" style="font-size:13px;">Select your room</div>
+  ${!fr.length ? `<div class="alert alert-warn">All rooms are taken. This property is full.</div>` : `
+  <div class="rs-grid">
+    ${p.rooms.map(r => {
+      const bk = roomBooking(p.id, r.id);
+      const who = bk ? mem(bk.memberId) : null;
+      if (who) {
+        return `<div class="rs-item rs-full">
+          <div class="rs-name">${esc(r.name)}</div>
+          <div class="rs-type">${rtl(r.type)}</div>
+          <div class="rs-who">${esc(who.name)}</div>
+        </div>`;
+      }
+      return `<div class="rs-item ${sel===r.id?'rs-sel':''}" data-a="sel-room" data-rid="${r.id}">
+        <div class="rs-name">${esc(r.name)}</div>
+        <div class="rs-type">${rtl(r.type)}</div>
+      </div>`;
+    }).join('')}
+  </div>`}
+  <div class="modal-foot">
+    <button class="btn btn-outline" data-a="close-modal">Cancel</button>
+    <button class="btn btn-primary" data-a="confirm-signup" data-pid="${p.id}" ${!sel||!fr.length?'disabled':''}>Confirm booking</button>
+  </div>`;
+}
+
+function modalImportConfirm(data) {
+  const { propCount, roomCount, errors } = data;
+  return `
+  <div class="modal-hdr">
+    <div class="modal-title">Import properties</div>
+    <button class="modal-close" data-a="close-modal">&times;</button>
+  </div>
+  <p class="sm" style="margin:0 0 12px;">Found <strong>${propCount} propert${propCount!==1?'ies':'y'}</strong> and <strong>${roomCount} room${roomCount!==1?'s':''}</strong> in the file.</p>
+  ${errors.length ? `<div class="alert alert-warn" style="margin-bottom:12px;"><strong>Warnings (${errors.length}):</strong><ul style="margin:6px 0 0;padding-left:16px;">${errors.map(e=>`<li class="sm">${esc(e)}</li>`).join('')}</ul></div>` : ''}
+  <p class="sm muted" style="margin:0 0 16px;">How would you like to import?</p>
+  <div style="display:flex;flex-direction:column;gap:10px;">
+    <button class="btn btn-primary" data-a="import-replace" style="justify-content:flex-start;text-align:left;">
+      <div><strong>Replace all</strong></div>
+      <div class="sm muted" style="font-weight:400;margin-top:2px;">Remove existing properties and load from file</div>
+    </button>
+    <button class="btn btn-outline" data-a="import-merge" style="justify-content:flex-start;text-align:left;">
+      <div><strong>Add to existing</strong></div>
+      <div class="sm muted" style="font-weight:400;margin-top:2px;">Keep current properties and append the imported ones</div>
+    </button>
+  </div>
+  <div class="modal-foot" style="margin-top:16px;">
+    <button class="btn btn-outline" data-a="close-modal">Cancel</button>
+  </div>`;
+}
+
+// ── Calendar export ───────────────────────────────────────────────────────────
+
+function downloadIcs(bid) {
+  const b = S.bookings.find(x => x.id === bid); if (!b) return;
+  const p = prop(b.propertyId); if (!p) return;
+  const room   = p.rooms.find(r => r.id === b.roomId);
+  const others = propBookings(p.id).filter(x => x.memberId !== b.memberId).map(x => mem(x.memberId)?.name).filter(Boolean);
+
+  // DTEND for all-day events is exclusive (day after last night)
+  const endD = new Date(p.weekEnd + 'T12:00:00Z');
+  endD.setUTCDate(endD.getUTCDate() + 1);
+  const dtStart = (p.weekStart || '').replace(/-/g, '');
+  const dtEnd   = isoDate(endD).replace(/-/g, '');
+  const stamp   = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15) + 'Z';
+
+  const descLines = [
+    room   ? `Room: ${room.name} (${rtl(room.type)})` : '',
+    others.length ? `Staying with: ${others.join(', ')}` : '',
+    p.notes       ? `Notes: ${p.notes}` : '',
+    p.listingLink ? `Listing: ${p.listingLink}` : '',
+  ].filter(Boolean).join('\\n');
+
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Newton//Accommodation Tracker//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    'BEGIN:VEVENT',
+    `UID:accom-${b.id}@newton`,
+    `DTSTAMP:${stamp}`,
+    `DTSTART;VALUE=DATE:${dtStart}`,
+    `DTEND;VALUE=DATE:${dtEnd}`,
+    `SUMMARY:🏠 ${p.name} — BAE Air`,
+    `LOCATION:${p.location || ''}`,
+    descLines ? `DESCRIPTION:${descLines}` : '',
+    p.listingLink ? `URL:${p.listingLink}` : '',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].filter(Boolean).join('\r\n');
+
+  const blob = new Blob([lines], { type: 'text/calendar;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = `${p.name.replace(/[^a-z0-9]/gi, '_')}_accommodation.ics`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ── Budget chart ─────────────────────────────────────────────────────────────
+
+let _budgetChart = null;
+
+function renderBudgetChart() {
+  const canvas = document.getElementById('budget-chart');
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  // 19-week window: 6 back, current, 12 forward
+  const todayMon = getMonday(isoDate(new Date()));
+  const start = new Date(todayMon + 'T12:00:00Z');
+  start.setUTCDate(start.getUTCDate() - 6 * 7);
+
+  const weekKeys = [], weekLabels = [];
+  for (let i = 0; i < 19; i++) {
+    const k = isoDate(start);
+    weekKeys.push(k);
+    weekLabels.push(fmtShort(k));
+    start.setUTCDate(start.getUTCDate() + 7);
+  }
+
+  // Build per-week computed values
+  const wkMap = {};
+  weeks().forEach(wk => {
+    const signups    = S.bookings.filter(b => wk.props.some(p => p.id === b.propertyId)).length;
+    const effNights  = Math.min(wkNights(wk), 3);
+    const entitlement = 175 * signups * effNights;
+    const cost       = wk.props.reduce((s, p) => s + (Number(p.totalPrice) || 0), 0);
+    wkMap[wk.wc] = { entitlement, cost };
+  });
+
+  const todayIdx  = weekKeys.indexOf(todayMon);
+  const spendData = weekKeys.map(k => wkMap[k]?.cost        ?? null);
+  const entData   = weekKeys.map(k => wkMap[k]?.entitlement ?? null);
+
+  // Inline plugin: vertical dashed line on current week
+  const nowLinePlugin = {
+    id: 'nowLine',
+    afterDraw(chart) {
+      if (todayIdx === -1) return;
+      const meta = chart.getDatasetMeta(0);
+      const pt   = meta.data[todayIdx];
+      if (!pt) return;
+      const { ctx, chartArea: { top, bottom } } = chart;
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(pt.x, top);
+      ctx.lineTo(pt.x, bottom);
+      ctx.strokeStyle = 'rgba(255,98,35,0.45)';
+      ctx.lineWidth   = 2;
+      ctx.setLineDash([5, 4]);
+      ctx.stroke();
+      ctx.restore();
+    }
+  };
+
+  if (_budgetChart) { _budgetChart.destroy(); _budgetChart = null; }
+
+  _budgetChart = new Chart(canvas, {
+    type: 'line',
+    plugins: [nowLinePlugin],
+    data: {
+      labels: weekLabels,
+      datasets: [
+        {
+          label: 'Entitlement',
+          data: entData,
+          borderColor: '#282D37',
+          backgroundColor: 'rgba(40,45,55,0.06)',
+          borderDash: [6, 3],
+          tension: 0.4,
+          pointRadius: weekKeys.map((k, i) => i === todayIdx ? 6 : 3),
+          pointHoverRadius: 7,
+          fill: false,
+          spanGaps: true,
+        },
+        {
+          label: 'Committed spend',
+          data: spendData,
+          borderColor: '#FF6223',
+          backgroundColor: 'rgba(255,98,35,0.08)',
+          tension: 0.4,
+          pointRadius: weekKeys.map((k, i) => i === todayIdx ? 6 : 3),
+          pointHoverRadius: 7,
+          fill: true,
+          spanGaps: true,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: { font: { family: 'Aptos, system-ui, sans-serif', size: 12 }, padding: 20, usePointStyle: true },
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: £${Number(ctx.raw ?? 0).toLocaleString('en-GB', { maximumFractionDigits: 0 })}`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(0,0,0,0.05)' },
+          ticks: { font: { family: 'Aptos, system-ui, sans-serif', size: 11 }, maxRotation: 45 },
+        },
+        y: {
+          beginAtZero: true,
+          grid: { color: 'rgba(0,0,0,0.05)' },
+          ticks: {
+            font: { family: 'Aptos, system-ui, sans-serif', size: 11 },
+            callback: v => '£' + Number(v).toLocaleString('en-GB', { maximumFractionDigits: 0 }),
+          },
+        },
+      },
+    },
+  });
+}
+
+// ── Excel import / export ─────────────────────────────────────────────────────
+
+function xlsxDateToIso(val) {
+  if (!val) return '';
+  if (val instanceof Date) {
+    return isoDate(new Date(Date.UTC(val.getFullYear(), val.getMonth(), val.getDate())));
+  }
+  if (typeof val === 'number') {
+    const d = XLSX.SSF.parse_date_code(val);
+    return `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
+  }
+  // Already a string like YYYY-MM-DD or DD/MM/YYYY
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(val))) return val;
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(String(val))) {
+    const [d,m,y] = String(val).split('/');
+    return `${y}-${m}-${d}`;
+  }
+  return String(val);
+}
+
+function downloadSample() {
+  if (typeof XLSX === 'undefined') { alert('Excel library not loaded. Please check your internet connection and try again.'); return; }
+  const wb = XLSX.utils.book_new();
+
+  const propRows = [
+    ['Name','Location','Listing Link','Week Start (DD/MM/YYYY)','Week End (DD/MM/YYYY)','W/C (DD/MM/YYYY)','Bedrooms','Bathrooms','Total Price (£)','Notes'],
+    ['Seaview House','Portsmouth','https://airbnb.com/rooms/example','05/01/2026','09/01/2026','05/01/2026',4,2,1200,'Parking available'],
+    ['City Apartment','Manchester','','12/01/2026','16/01/2026','12/01/2026',2,1,800,''],
+  ];
+  const roomRows = [
+    ['Property Name','Room Name','Room Type'],
+    ['Seaview House','Master bedroom','master'],
+    ['Seaview House','Room 2','king'],
+    ['Seaview House','Room 3','double'],
+    ['Seaview House','Sofa bed','sofa-bed'],
+    ['City Apartment','Room A','queen'],
+    ['City Apartment','Room B','twin'],
+  ];
+
+  const wsProps = XLSX.utils.aoa_to_sheet(propRows);
+  wsProps['!cols'] = [20,18,35,22,22,22,10,10,16,25].map(w=>({wch:w}));
+  XLSX.utils.book_append_sheet(wb, wsProps, 'Properties');
+
+  const wsRooms = XLSX.utils.aoa_to_sheet(roomRows);
+  wsRooms['!cols'] = [20,20,15].map(w=>({wch:w}));
+  XLSX.utils.book_append_sheet(wb, wsRooms, 'Rooms');
+
+  XLSX.writeFile(wb, 'accommodation_sample.xlsx');
+}
+
+function importExcel(file) {
+  if (typeof XLSX === 'undefined') { alert('Excel library not loaded. Please check your internet connection and try again.'); return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb    = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+      const wsProp = wb.Sheets['Properties'];
+      const wsRoom = wb.Sheets['Rooms'];
+      if (!wsProp) { alert('Could not find a sheet named "Properties". Please use the sample file as a template.'); return; }
+
+      const propRows = XLSX.utils.sheet_to_json(wsProp, { defval: '' });
+      const roomRows = wsRoom ? XLSX.utils.sheet_to_json(wsRoom, { defval: '' }) : [];
+      const validTypes = ROOM_TYPES.map(r => r.v);
+      const errors = [];
+
+      // Build room lookup: property name -> [rooms]
+      const roomsByProp = {};
+      roomRows.forEach((r, i) => {
+        const pname = String(r['Property Name'] || '').trim();
+        const rname = String(r['Room Name'] || '').trim();
+        const rtype = String(r['Room Type'] || '').trim().toLowerCase();
+        if (!pname || !rname) { errors.push(`Rooms row ${i+2}: missing Property Name or Room Name — skipped`); return; }
+        const resolvedType = validTypes.includes(rtype) ? rtype : 'double';
+        if (!validTypes.includes(rtype)) errors.push(`Rooms row ${i+2}: unknown type "${rtype}" — defaulted to double`);
+        if (!roomsByProp[pname]) roomsByProp[pname] = [];
+        roomsByProp[pname].push({ id: uid(), name: rname, type: resolvedType });
+      });
+
+      const imported = [];
+      propRows.forEach((r, i) => {
+        const name = String(r['Name'] || '').trim();
+        if (!name) { errors.push(`Properties row ${i+2}: missing Name — skipped`); return; }
+        const ws = xlsxDateToIso(r['Week Start (DD/MM/YYYY)'] || r['Week Start'] || '');
+        const we = xlsxDateToIso(r['Week End (DD/MM/YYYY)']   || r['Week End']   || '');
+        const wc = xlsxDateToIso(r['W/C (DD/MM/YYYY)']        || r['W/C']        || '') || (ws ? getMonday(ws) : '');
+        if (!ws || !we) errors.push(`Properties row ${i+2}: "${name}" missing Week Start or Week End`);
+        imported.push({
+          id:         uid(),
+          name,
+          location:   String(r['Location'] || '').trim(),
+          listingLink:(s => s && !/^https?:\/\//i.test(s) ? 'https://'+s : s)(String(r['Listing Link'] || '').trim()),
+          wc,
+          weekStart:  ws,
+          weekEnd:    we,
+          bedrooms:   parseInt(r['Bedrooms'])  || 0,
+          bathrooms:  parseInt(r['Bathrooms']) || 0,
+          totalPrice: parseFloat(String(r['Total Price (£)'] || r['Total Price'] || '0').replace(/[^0-9.]/g,'')) || 0,
+          notes:      String(r['Notes'] || '').trim(),
+          rooms:      roomsByProp[name] || [],
+        });
+      });
+
+      if (!imported.length) { alert('No valid properties found in the file.'); return; }
+      F.importData = imported;
+      set({ modal: { type: 'import-confirm', data: { propCount: imported.length, roomCount: imported.reduce((s,p)=>s+p.rooms.length,0), errors } } });
+    } catch(err) {
+      alert('Could not read file: ' + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ── Event handling ────────────────────────────────────────────────────────────
+
+function listen() {
+  const app = document.getElementById('app');
+  app.addEventListener('click',  onClick);
+  app.addEventListener('change', onChange);
+  document.getElementById('xlsx-input').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (file) importExcel(file);
+  });
+}
+
+function onClick(e) {
+  const el = e.target.closest('[data-a]');
+  if (!el) return;
+  const a = el.dataset.a;
+
+  switch (a) {
+    case 'landing':      set({ view: 'landing', memberId: null }); break;
+    case 'go-member':    set({ view: 'member',  memberId: null }); break;
+    case 'go-organiser': set({ view: 'organiser' }); break;
+    case 'org-login': {
+      const pw = document.getElementById('org-pw')?.value;
+      if (pw === 'admin') { orgAuthed = true; render(); }
+      else { const err = document.getElementById('org-pw-err'); if (err) err.style.display = 'block'; }
+      break;
+    }
+    case 'change-mem':   set({ memberId: null }); break;
+
+    case 'confirm-mem': {
+      const v = document.getElementById('mem-sel')?.value;
+      if (v) set({ memberId: v, memAddMode: false });
+      break;
+    }
+
+    case 'toggle-add-self': set({ memAddMode: !S.memAddMode }); break;
+
+    case 'add-self': {
+      const name = document.getElementById('self-name')?.value?.trim();
+      if (!name) { alert('Please enter your name.'); return; }
+      const email = document.getElementById('self-email')?.value?.trim();
+      const id = uid();
+      set({
+        members: [...S.members, { id, name, email }],
+        memberId: id,
+        memAddMode: false,
+      });
+      break;
+    }
+
+    case 'mem-tab': set({ memTab: el.dataset.tab, ...(el.dataset.tab === 'available' ? { memExpandedWcs: [] } : {}) }); break;
+    case 'cal-prev': {
+      const [y, mo] = (S.memCalYM || isoDate(new Date()).slice(0,7)).split('-').map(Number);
+      set({ memCalYM: mo === 1 ? `${y-1}-12` : `${y}-${String(mo-1).padStart(2,'0')}` });
+      break;
+    }
+    case 'cal-next': {
+      const [y, mo] = (S.memCalYM || isoDate(new Date()).slice(0,7)).split('-').map(Number);
+      set({ memCalYM: mo === 12 ? `${y+1}-01` : `${y}-${String(mo+1).padStart(2,'0')}` });
+      break;
+    }
+    case 'org-tab':   set({ orgTab: el.dataset.tab }); break;
+    case 'prop-view': set({ propView: el.dataset.view, orgWcExpanded: [] }); break;
+    case 'org-prop-toggle-wc': {
+      const wc  = el.dataset.wc;
+      const cur = S.orgWcExpanded || [];
+      set({ orgWcExpanded: cur.includes(wc) ? cur.filter(x => x !== wc) : [...cur, wc] });
+      break;
+    }
+
+    case 'toggle-prop': set({ expanded: S.expanded === el.dataset.pid ? null : el.dataset.pid }); break;
+    case 'toggle-budget-wk': set({ expandedBudgetWk: S.expandedBudgetWk === el.dataset.wc ? null : el.dataset.wc }); break;
+    case 'mem-toggle-wc': {
+      const wc  = el.dataset.wc;
+      const all = weeks().map(w => w.wc);
+      const cur = S.memExpandedWcs === null ? all : S.memExpandedWcs;
+      const next = cur.includes(wc) ? cur.filter(x => x !== wc) : [...cur, wc];
+      set({ memExpandedWcs: next.length === all.length ? null : next });
+      break;
+    }
+
+    case 'download-sample': downloadSample(); break;
+    case 'import-excel':
+      document.getElementById('xlsx-input').value = '';
+      document.getElementById('xlsx-input').click();
+      break;
+    case 'import-replace':
+      if (F.importData) { set({ properties: F.importData, bookings: [], modal: null }); F.importData = null; }
+      break;
+    case 'import-merge':
+      if (F.importData) { set({ properties: [...S.properties, ...F.importData], modal: null }); F.importData = null; }
+      break;
+    case 'open-add-prop':  F = { rooms: [] }; set({ modal: { type: 'add-prop',  data: {} } }); break;
+    case 'open-edit-prop': { const p = prop(el.dataset.pid); F = { rooms: p ? JSON.parse(JSON.stringify(p.rooms)) : [] }; set({ modal: { type: 'edit-prop', data: { p } } }); break; }
+    case 'dup-prop': {
+      const p = prop(el.dataset.pid); if (!p) break;
+      const copy = { ...p, id: uid(), name: p.name + ' (copy)', rooms: p.rooms.map(r => ({ ...r, id: uid() })) };
+      set({ properties: [...S.properties, copy] });
+      break;
+    }
+    case 'del-prop': delProp(el.dataset.pid); break;
+
+    case 'add-room': {
+      syncRooms();
+      F.rooms.push({ id: uid(), name: '', type: 'double' });
+      refreshRooms();
+      break;
+    }
+    case 'rm-room': {
+      syncRooms();
+      F.rooms.splice(parseInt(el.dataset.i), 1);
+      refreshRooms();
+      break;
+    }
+
+    case 'save-add-prop': { const d = collectProp(); if (d) { addProp(d); set({ modal: null }); } break; }
+    case 'save-edit-prop': { const d = collectProp(); if (d) { updProp(el.dataset.pid, d); set({ modal: null }); } break; }
+
+    case 'open-add-mem':  F = {}; set({ modal: { type: 'add-mem',  data: {} } }); break;
+    case 'open-edit-mem': { const m = mem(el.dataset.mid); F = {}; set({ modal: { type: 'edit-mem', data: { m } } }); break; }
+    case 'del-mem': delMem(el.dataset.mid); break;
+
+    case 'save-add-mem': {
+      const name = document.getElementById('m-name')?.value?.trim();
+      const email = document.getElementById('m-email')?.value?.trim();
+      if (!name) { alert('Please enter a name.'); return; }
+      addMem({ name, email }); set({ modal: null }); break;
+    }
+    case 'save-edit-mem': {
+      const name = document.getElementById('m-name')?.value?.trim();
+      const email = document.getElementById('m-email')?.value?.trim();
+      if (!name) { alert('Please enter a name.'); return; }
+      updMem(el.dataset.mid, { name, email }); set({ modal: null }); break;
+    }
+
+    case 'open-signup': F = { roomId: null }; set({ modal: { type: 'signup', data: { pid: el.dataset.pid } } }); break;
+    case 'sel-room': {
+      if (!el.classList.contains('rs-full')) {
+        F.roomId = el.dataset.rid;
+        document.querySelectorAll('.rs-item').forEach(x => x.classList.toggle('rs-sel', x.dataset.rid === F.roomId));
+        const btn = document.querySelector('[data-a="confirm-signup"]');
+        if (btn) btn.disabled = false;
+      }
+      break;
+    }
+    case 'confirm-signup': {
+      if (!F.roomId) break;
+      book(S.memberId, el.dataset.pid, F.roomId);
+      set({ modal: null, memTab: 'bookings' });
+      break;
+    }
+
+    case 'add-to-cal': downloadIcs(el.dataset.bid); break;
+    case 'unbook': unbook(el.dataset.bid); break;
+
+    case 'quick-book': {
+      const { pid, rid } = el.dataset;
+      const p = prop(pid); if (!p) break;
+      // Remove any existing booking the member has at this property's week
+      const wc = propWc(p);
+      const existingThisWk = S.bookings.find(b =>
+        b.memberId === S.memberId && S.properties.some(q => propWc(q) === wc && q.id === b.propertyId)
+      );
+      if (existingThisWk) {
+        const existProp = prop(existingThisWk.propertyId);
+        if (!confirm(`Switch from ${existProp?.name || 'your current booking'} to ${p.name}?`)) break;
+        unbook(existingThisWk.id);
+      }
+      book(S.memberId, pid, rid);
+      set({ memTab: 'bookings' });
+      break;
+    }
+
+    case 'send-emails': {
+      const p = prop(el.dataset.pid); if (!p) break;
+      const bks = propBookings(p.id);
+      const emails = bks.map(b => mem(b.memberId)?.email).filter(Boolean);
+      if (!emails.length) { alert('No email addresses found for booked members.'); break; }
+      const booked = bks.map(b => ({ m: mem(b.memberId), r: p.rooms.find(x=>x.id===b.roomId) })).filter(x=>x.m);
+      const body = genEmail(p, booked);
+      window.open(`mailto:${emails.join(',')}?subject=${encodeURIComponent('Accommodation details — '+p.name)}&body=${encodeURIComponent(body)}`);
+      break;
+    }
+
+    case 'close-modal':    set({ modal: null }); break;
+    case 'overlay-close':  if (e.target.classList.contains('overlay')) set({ modal: null }); break;
+  }
+}
+
+function onChange(e) {
+  if (e.target.dataset.a === 'assign-room') {
+    const { pid, rid } = e.target.dataset;
+    const mid = e.target.value;
+    let bookings = S.bookings.filter(b => !(b.propertyId === pid && b.roomId === rid));
+    if (mid) {
+      bookings = bookings.filter(b => !(b.memberId === mid && b.propertyId === pid));
+      bookings = [...bookings, { id: uid(), memberId: mid, propertyId: pid, roomId: rid }];
+    }
+    set({ bookings });
+    return;
+  }
+  if (e.target.dataset.a === 'sel-send-prop') {
+    set({ sendPropId: e.target.value });
+    return;
+  }
+  if (e.target.dataset.a === 'budget-wc-filter') {
+    set({ budgetWcFilter: e.target.value || null });
+    return;
+  }
+  if (e.target.dataset.a === 'mem-house-wc') {
+    set({ memHouseWc: e.target.value || null });
+    return;
+  }
+  // Auto-select W/C from week start date when adding/editing a property
+  if (e.target.id === 'p-ws') {
+    const wc = document.getElementById('p-wc');
+    if (wc && !wc.value) wc.value = getMonday(e.target.value);
+    return;
+  }
+  if (e.target.id === 'p-wc') return;
+}
+
+function syncRooms() {
+  const names = document.querySelectorAll('.rn');
+  const types  = document.querySelectorAll('.rt');
+  names.forEach((el, i) => { if (F.rooms[i]) F.rooms[i].name = el.value; });
+  types.forEach((el, i) => { if (F.rooms[i]) F.rooms[i].type = el.value; });
+}
+
+function refreshRooms() {
+  const ed = document.getElementById('rooms-ed');
+  if (ed) ed.innerHTML = F.rooms.map((r, i) => reRow(r, i)).join('');
+}
+
+function collectProp() {
+  syncRooms();
+  const name = document.getElementById('p-name')?.value?.trim();
+  if (!name) { alert('Please enter a property name.'); return null; }
+  const ws = document.getElementById('p-ws')?.value;
+  const we = document.getElementById('p-we')?.value;
+  if (!ws || !we) { alert('Please enter the week start and end dates.'); return null; }
+  const wcRaw = document.getElementById('p-wc')?.value || getMonday(ws);
+  return {
+    name,
+    location:    document.getElementById('p-loc')?.value?.trim()   || '',
+    listingLink: (r => r && !/^https?:\/\//i.test(r) ? 'https://' + r : r)(document.getElementById('p-link')?.value?.trim()),
+    wc:          wcRaw,
+    weekStart:   ws,
+    weekEnd:     we,
+    bedrooms:    parseInt(document.getElementById('p-beds')?.value)  || 0,
+    bathrooms:   parseInt(document.getElementById('p-baths')?.value) || 0,
+    totalPrice:  parseFloat(document.getElementById('p-price')?.value) || 0,
+    notes:       document.getElementById('p-notes')?.value?.trim() || '',
+    rooms:       F.rooms.map(r => ({ ...r, id: r.id || uid() })),
+  };
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+
+render();
+listen();
+</script>
+</body>
+</html>
