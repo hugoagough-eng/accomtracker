@@ -4,13 +4,22 @@
   PURPOSE: BAE Air project accommodation tracker — Newton internal tool.
            Two views: team member (sign up, view bookings) and organiser
            (manage properties, budget, members, send details).
-  VERSION: 1.0 | 2026-05-18
+  VERSION: 1.1 | 2026-05-19
   CHANGES:
     v1.0 2026-05-18 -- Initial build. Self-contained single-file app using
                        localStorage for persistence. No server required.
+    v1.1 2026-05-19 -- Added shared storage via JSONBin.io. The organiser
+                       pastes a Master Key once, gets a share link, and the
+                       team's data syncs across browsers (polls every 4s,
+                       three-way merge on bookings/properties/members).
   CAVEATS:
     - Email sending opens the local mail client via mailto: links
-    - Data is stored in the browser's localStorage under 'accom_tracker_v1'
+    - Local fallback: data is stored in browser localStorage under
+      'accom_tracker_v1'; sync config under 'accom_tracker_sync_v1'.
+    - Share links embed the JSONBin Master Key in the URL fragment, so
+      anyone with the link has read/write access to the bin. Use a
+      dedicated JSONBin account for this tracker.
+    - Modal edits pause polling so remote pulls don't blow away open forms.
 ============================================================================ -->
 <html lang="en">
 <head>
@@ -56,6 +65,15 @@
     .hdr-bar { width: 3px; height: 22px; background: var(--orange); border-radius: 2px; }
     .hdr-right { display: flex; align-items: center; gap: 10px; }
     .hdr-role { color: rgba(255,255,255,0.5); font-size: 12px; }
+    .sync-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 500; background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.85); white-space: nowrap; }
+    .sync-pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+    .sync-pill.sync-synced  { color: #86EFAC; }
+    .sync-pill.sync-syncing { color: #FCD34D; }
+    .sync-pill.sync-offline { color: rgba(255,255,255,0.55); }
+    .sync-pill.sync-error   { color: #FCA5A5; }
+    .sync-pill.sync-local   { color: rgba(255,255,255,0.55); }
+    @keyframes sync-pulse { 50% { opacity: 0.45; } }
+    .sync-pill.sync-syncing::before { animation: sync-pulse 1s ease-in-out infinite; }
 
     /* ── Layout ──────────────────────────────────── */
     .page { max-width: 1080px; margin: 0 auto; padding: 32px 24px; }
@@ -273,12 +291,18 @@
 <script>
 // ============================================================================
 // FILE: index.html (embedded script)
-// PURPOSE: State management, rendering, and event handling for accommodation
-//          tracker. Uses localStorage for persistence; no server required.
-// VERSION: 1.0 | 2026-05-18
+// PURPOSE: State management, rendering, sync, and event handling for the
+//          accommodation tracker. localStorage for offline-first persistence;
+//          JSONBin.io for cross-device sync via shareable link.
+// VERSION: 1.1 | 2026-05-19
 // ============================================================================
 
 const STORE_KEY = 'accom_tracker_v1';
+const SYNC_BASE = 'https://api.jsonbin.io/v3/b';
+const SYNC_LS_KEY = 'accom_tracker_sync_v1';
+const SYNC_FIELDS = ['properties', 'members', 'bookings', 'weeklyBudgets'];
+const POLL_MS = 4000;
+const PUSH_DEBOUNCE_MS = 600;
 let orgAuthed = false;
 
 const ROOM_TYPES = [
@@ -298,7 +322,7 @@ let S = load();
 let F = {}; // ephemeral form/modal state
 
 function defaultData() {
-  return { properties: [], members: [], bookings: [], weeklyBudgets: {} };
+  return { properties: [], members: [], bookings: [], weeklyBudgets: {}, updatedAt: 0 };
 }
 
 function defaultUI() {
@@ -333,8 +357,11 @@ function save() {
 }
 
 function set(updates) {
+  const touchesData = SYNC_FIELDS.some(k => k in updates);
+  if (touchesData) updates = { ...updates, updatedAt: Date.now() };
   S = { ...S, ...updates };
   save();
+  if (touchesData) schedulePush();
   render();
 }
 
@@ -441,6 +468,235 @@ function unbook(bid) {
   set({ bookings: S.bookings.filter(b => b.id !== bid) });
 }
 
+// ── Sync (shared storage via JSONBin.io) ─────────────────────────────────────
+
+let syncCfg = loadSyncCfg();
+let syncState = {
+  baseRemote: null,        // last server-confirmed snapshot, for three-way merge
+  lastPushedJson: '',
+  pushTimer: null,
+  pollTimer: null,
+  status: syncCfg.binId ? 'syncing' : 'local',
+};
+
+function loadSyncCfg() {
+  try {
+    const raw = localStorage.getItem(SYNC_LS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (_) {}
+  return { masterKey: '', binId: '' };
+}
+
+function saveSyncCfg() {
+  localStorage.setItem(SYNC_LS_KEY, JSON.stringify(syncCfg));
+}
+
+function syncDataSlice() {
+  const out = {};
+  SYNC_FIELDS.forEach(k => { out[k] = S[k]; });
+  out.updatedAt = S.updatedAt || 0;
+  return out;
+}
+
+function renderSyncPill() {
+  const labels = {
+    syncing: ['sync-syncing', 'Syncing…'],
+    synced:  ['sync-synced',  'Live'],
+    offline: ['sync-offline', 'Offline'],
+    error:   ['sync-error',   'Sync error'],
+    local:   ['sync-local',   'Local only'],
+  };
+  const key = syncCfg.binId ? syncState.status : 'local';
+  const [cls, label] = labels[key] || labels.synced;
+  const title = syncCfg.binId ? 'Shared bin: ' + syncCfg.binId : 'Data is local to this browser only';
+  return `<span id="sync-pill" class="sync-pill ${cls}" title="${esc(title)}">${label}</span>`;
+}
+
+function setSyncStatus(s) {
+  if (syncState.status === s) return;
+  syncState.status = s;
+  const el = document.getElementById('sync-pill');
+  if (!el) return;
+  const tmp = document.createElement('div');
+  tmp.innerHTML = renderSyncPill();
+  el.replaceWith(tmp.firstElementChild);
+}
+
+function readShareHash() {
+  const hash = location.hash.replace(/^#/, '');
+  if (!hash) return null;
+  const params = new URLSearchParams(hash);
+  const binId = params.get('share');
+  if (!binId) return null;
+  return { binId, masterKey: params.get('key') || '' };
+}
+
+function setShareHash(binId, key) {
+  const params = new URLSearchParams();
+  params.set('share', binId);
+  if (key) params.set('key', key);
+  history.replaceState(null, '', '#' + params.toString());
+}
+
+async function createShareBin() {
+  if (!syncCfg.masterKey) { alert('Paste your JSONBin Master Key first.'); return null; }
+  setSyncStatus('syncing');
+  try {
+    const slice = { ...syncDataSlice(), updatedAt: Date.now() };
+    const res = await fetch(SYNC_BASE, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Master-Key': syncCfg.masterKey,
+        'X-Bin-Private': 'false',
+        'X-Bin-Name': 'Accommodation tracker — ' + new Date().toISOString().slice(0, 10),
+      },
+      body: JSON.stringify(slice),
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      throw new Error('Could not create bin (' + res.status + '): ' + txt.slice(0, 200));
+    }
+    const j = await res.json();
+    const id = j && j.metadata && j.metadata.id;
+    if (!id) throw new Error('No bin id returned by JSONBin');
+    syncCfg.binId = id;
+    saveSyncCfg();
+    syncState.lastPushedJson = JSON.stringify(slice);
+    syncState.baseRemote = JSON.parse(JSON.stringify(slice));
+    S = { ...S, updatedAt: slice.updatedAt };
+    save();
+    setShareHash(id, syncCfg.masterKey);
+    startPolling();
+    setSyncStatus('synced');
+    return id;
+  } catch (err) {
+    setSyncStatus('error');
+    alert('Could not create shared bin:\n\n' + err.message + '\n\nDouble-check the Master Key.');
+    return null;
+  }
+}
+
+async function pullRemote() {
+  if (!syncCfg.binId) return;
+  try {
+    const headers = {};
+    if (syncCfg.masterKey) headers['X-Master-Key'] = syncCfg.masterKey;
+    const res = await fetch(SYNC_BASE + '/' + encodeURIComponent(syncCfg.binId) + '/latest', {
+      headers, cache: 'no-store',
+    });
+    if (!res.ok) {
+      if (res.status === 404) { setSyncStatus('error'); return; }
+      throw new Error('HTTP ' + res.status);
+    }
+    const j = await res.json();
+    const remote = j && j.record;
+    if (!remote || typeof remote !== 'object') return;
+    const firstPull = syncState.baseRemote === null;
+    const localUpd  = S.updatedAt || 0;
+    const remoteUpd = remote.updatedAt || 0;
+    if (!S.modal && (firstPull || remoteUpd > localUpd)) {
+      const next = { ...S };
+      SYNC_FIELDS.forEach(k => { if (k in remote) next[k] = remote[k]; });
+      next.updatedAt = remoteUpd;
+      S = next;
+      save();
+      render();
+    }
+    syncState.baseRemote = JSON.parse(JSON.stringify(remote));
+    setSyncStatus('synced');
+  } catch (_err) {
+    setSyncStatus('offline');
+  }
+}
+
+function schedulePush() {
+  if (!syncCfg.binId || !syncCfg.masterKey) return;
+  clearTimeout(syncState.pushTimer);
+  syncState.pushTimer = setTimeout(pushLocal, PUSH_DEBOUNCE_MS);
+}
+
+// Three-way merge: union by id, prefer local on conflict, drop deletions only
+// when the deleted side actually had the item in the last-known base.
+function mergeArrays(local, remote, base) {
+  const byId = m => Object.fromEntries((m || []).map(x => [x.id, x]));
+  const lMap = byId(local), rMap = byId(remote), bMap = byId(base);
+  const out = {};
+  const ids = new Set([...Object.keys(lMap), ...Object.keys(rMap)]);
+  for (const id of ids) {
+    const l = lMap[id], r = rMap[id], b = bMap[id];
+    if (l && r) out[id] = l;
+    else if (l && !r && !b) out[id] = l;
+    else if (!l && r && !b) out[id] = r;
+  }
+  return Object.values(out);
+}
+
+async function pushLocal() {
+  if (!syncCfg.binId || !syncCfg.masterKey) return;
+  setSyncStatus('syncing');
+  try {
+    const preRes = await fetch(SYNC_BASE + '/' + encodeURIComponent(syncCfg.binId) + '/latest', {
+      headers: { 'X-Master-Key': syncCfg.masterKey }, cache: 'no-store',
+    });
+    if (!preRes.ok) throw new Error('Pre-push GET HTTP ' + preRes.status);
+    const remote = ((await preRes.json()) || {}).record || {};
+    const base = syncState.baseRemote || {};
+
+    let payload;
+    if ((remote.updatedAt || 0) > (base.updatedAt || 0)) {
+      payload = {
+        properties: mergeArrays(S.properties, remote.properties, base.properties),
+        members:    mergeArrays(S.members,    remote.members,    base.members),
+        bookings:   mergeArrays(S.bookings,   remote.bookings,   base.bookings),
+        weeklyBudgets: { ...(remote.weeklyBudgets || {}), ...(S.weeklyBudgets || {}) },
+        updatedAt: Date.now(),
+      };
+      S = { ...S, ...payload };
+      save();
+      render();
+    } else {
+      payload = { ...syncDataSlice(), updatedAt: Date.now() };
+    }
+
+    const putRes = await fetch(SYNC_BASE + '/' + encodeURIComponent(syncCfg.binId), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Master-Key': syncCfg.masterKey },
+      body: JSON.stringify(payload),
+    });
+    if (!putRes.ok) throw new Error('PUT HTTP ' + putRes.status);
+
+    syncState.lastPushedJson = JSON.stringify(payload);
+    syncState.baseRemote = JSON.parse(JSON.stringify(payload));
+    setSyncStatus('synced');
+  } catch (err) {
+    setSyncStatus('error');
+    console.warn('Sync push failed:', err);
+  }
+}
+
+function startPolling() {
+  if (syncState.pollTimer) clearInterval(syncState.pollTimer);
+  syncState.pollTimer = setInterval(() => {
+    if (document.hidden || S.modal) return;
+    pullRemote();
+  }, POLL_MS);
+}
+
+function initSync() {
+  const fromHash = readShareHash();
+  if (fromHash) {
+    if (fromHash.binId !== syncCfg.binId) syncState.baseRemote = null;
+    syncCfg = { binId: fromHash.binId, masterKey: fromHash.masterKey || syncCfg.masterKey };
+    saveSyncCfg();
+  } else if (syncCfg.binId) {
+    setShareHash(syncCfg.binId, syncCfg.masterKey);
+  }
+  if (syncCfg.binId) {
+    pullRemote().then(() => startPolling());
+  }
+}
+
 // ── Render ───────────────────────────────────────────────────────────────────
 
 function render() {
@@ -457,9 +713,14 @@ function render() {
 function hdr() {
   const user = S.view === 'member'    ? (mem(S.memberId)?.name || 'Team member') :
                S.view === 'organiser' ? 'Organiser' : '';
+  const shareBtn = syncCfg.binId
+    ? `<button class="btn btn-outline-lt btn-sm" data-a="copy-share">Copy link</button>`
+    : `<button class="btn btn-outline-lt btn-sm" data-a="open-share-setup">Share</button>`;
   return `<header class="hdr">
     <div class="hdr-logo"><div class="hdr-bar"></div>Accommodation tracker</div>
     <div class="hdr-right">
+      ${renderSyncPill()}
+      ${shareBtn}
       ${user ? `<span class="hdr-role">${esc(user)}</span>` : ''}
       ${S.view !== 'landing' ? `<button class="btn btn-outline-lt btn-sm" data-a="landing">Switch view</button>` : ''}
     </div>
@@ -1200,6 +1461,8 @@ function renderModal() {
   else if (type === 'add-mem' || type === 'edit-mem') inner = modalMem(type, data);
   else if (type === 'signup') inner = modalSignup(data);
   else if (type === 'import-confirm') inner = modalImportConfirm(data);
+  else if (type === 'share-setup') inner = modalShareSetup();
+  else if (type === 'share-link')  inner = modalShareLink(data);
   return `<div class="overlay" data-a="overlay-close"><div class="modal">${inner}</div></div>`;
 }
 
@@ -1341,6 +1604,55 @@ function modalImportConfirm(data) {
   </div>
   <div class="modal-foot" style="margin-top:16px;">
     <button class="btn btn-outline" data-a="close-modal">Cancel</button>
+  </div>`;
+}
+
+function modalShareSetup() {
+  return `
+  <div class="modal-hdr">
+    <div class="modal-title">Share with your team</div>
+    <button class="modal-close" data-a="close-modal">&times;</button>
+  </div>
+  <div class="sm muted" style="margin: 0 0 14px;">Sync this tracker across devices via JSONBin.io. Anyone with the share link sees the same properties and bookings, live.</div>
+  <div style="background:#f9fafb;border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px;">
+    <div style="font-weight:600;font-size:13px;margin-bottom:8px;">One-time setup</div>
+    <ol style="font-size:13px;line-height:1.7;margin:0;padding-left:18px;color:var(--text);">
+      <li>Create a free account at <a href="https://jsonbin.io" target="_blank" rel="noopener" style="color:var(--orange);font-weight:500;">jsonbin.io</a></li>
+      <li>Open <strong>API Keys</strong> in the dashboard and copy your <strong>X-Master-Key</strong></li>
+      <li>Paste it below</li>
+    </ol>
+  </div>
+  <div class="fg">
+    <label>JSONBin Master Key</label>
+    <input type="password" id="sync-key" placeholder="$2a$10$..." value="${esc(syncCfg.masterKey || '')}" autofocus>
+  </div>
+  <div style="background:var(--warning-bg);border:1px solid #FBBF24;border-radius:8px;padding:10px 12px;font-size:12px;color:var(--warning);margin:0 0 8px;">
+    <strong>Heads up:</strong> the share link embeds this key, so anyone with the link can edit (and delete) bins on the JSONBin account. Use a dedicated account for this tracker.
+  </div>
+  <div class="modal-foot">
+    <button class="btn btn-outline" data-a="close-modal">Cancel</button>
+    <button class="btn btn-primary"  data-a="save-share-setup">Create share link</button>
+  </div>`;
+}
+
+function modalShareLink(data) {
+  const url = (data && data.url) || location.href;
+  return `
+  <div class="modal-hdr">
+    <div class="modal-title">Share link ready</div>
+    <button class="modal-close" data-a="close-modal">&times;</button>
+  </div>
+  <div class="sm" style="margin:0 0 12px;">Send this link to your team. Anyone who opens it will see the same data and can book rooms.</div>
+  <div class="fg">
+    <label>Share URL</label>
+    <textarea id="share-url" readonly rows="3" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all;" onclick="this.select()">${esc(url)}</textarea>
+  </div>
+  <div style="background:var(--warning-bg);border:1px solid #FBBF24;border-radius:8px;padding:10px 12px;font-size:12px;color:var(--warning);margin:0 0 8px;">
+    <strong>Keep this internal.</strong> The fragment after <code>#</code> contains a write key for the bin.
+  </div>
+  <div class="modal-foot">
+    <button class="btn btn-outline" data-a="close-modal">Close</button>
+    <button class="btn btn-primary"  data-a="copy-share">Copy link</button>
   </div>`;
 }
 
@@ -1811,6 +2123,38 @@ function onClick(e) {
       break;
     }
 
+    case 'open-share-setup': set({ modal: { type: 'share-setup' } }); break;
+
+    case 'save-share-setup': {
+      const key = document.getElementById('sync-key')?.value?.trim();
+      if (!key) { alert('Please paste your Master Key.'); return; }
+      syncCfg.masterKey = key;
+      saveSyncCfg();
+      set({ modal: null });
+      createShareBin().then(id => {
+        if (id) set({ modal: { type: 'share-link', data: { url: location.href } } });
+      });
+      break;
+    }
+
+    case 'copy-share': {
+      const url = location.href;
+      const btn = el;
+      const flash = txt => {
+        if (!btn) return;
+        const old = btn.textContent;
+        btn.textContent = txt;
+        setTimeout(() => { btn.textContent = old; }, 1200);
+      };
+      const fallback = () => prompt('Copy this link:', url);
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(() => flash('Copied!'), fallback);
+      } else {
+        fallback();
+      }
+      break;
+    }
+
     case 'close-modal':    set({ modal: null }); break;
     case 'overlay-close':  if (e.target.classList.contains('overlay')) set({ modal: null }); break;
   }
@@ -1886,6 +2230,7 @@ function collectProp() {
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
+initSync();
 render();
 listen();
 </script>
