@@ -1324,6 +1324,7 @@ function memHousesView(m) {
             <div class="rc-name">${esc(r.name)}</div>
             <div class="rc-type">${rtl(r.type)}</div>
             ${whoHtml}
+            ${who && !isMe ? memRatingPill(who.id) : ''}
           </div>`;
         }).join('')}
       </div>
