@@ -4,7 +4,7 @@
   PURPOSE: BAE Air project accommodation tracker — Newton internal tool.
            Two views: team member (sign up, view bookings) and organiser
            (manage properties, budget, members, send details).
-  VERSION: 1.3 | 2026-05-20
+  VERSION: 1.4 | 2026-05-20
   CHANGES:
     v1.0 2026-05-18 -- Initial build. Self-contained single-file app using
                        localStorage for persistence. No server required.
@@ -20,6 +20,12 @@
     v1.3 2026-05-20 -- Bake in DEFAULT_BIN_ID and DEFAULT_MASTER_KEY so the
                        whole team lands on the same shared bin without any
                        setup. The share dialog still works for overrides.
+    v1.4 2026-05-20 -- Full mobile pass for iPhone Safari: viewport-fit
+                       cover with safe-area insets, dvh for full-height
+                       containers, 16px inputs to stop focus zoom, 44px
+                       touch targets, horizontally-scrolling tabs, modal
+                       sheet style on small screens, table overflow scroll,
+                       stacked page header, hover-only hover effects.
   CAVEATS:
     - Email sending opens the local mail client via mailto: links
     - Local fallback: data is stored in browser localStorage under
@@ -32,7 +38,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#282D37">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="format-detection" content="telephone=no">
   <title>Accommodation tracker — BAE Air</title>
   <style>
     :root {
@@ -65,10 +75,12 @@
       --shadow-lg:    0 24px 56px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.08);
     }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+    body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; min-height: 100dvh; font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
+    button, a, [role="button"], [data-a] { -webkit-tap-highlight-color: transparent; }
 
     /* ── Header ─────────────────────────────────── */
-    .hdr { background: var(--slate); height: 58px; display: flex; align-items: center; justify-content: space-between; padding: 0 28px; box-shadow: 0 1px 0 rgba(255,255,255,0.07); }
+    .hdr { background: var(--slate); height: 58px; display: flex; align-items: center; justify-content: space-between; padding: 0 28px; padding-left: max(28px, env(safe-area-inset-left)); padding-right: max(28px, env(safe-area-inset-right)); box-shadow: 0 1px 0 rgba(255,255,255,0.07); }
     .hdr-logo { display: flex; align-items: center; gap: 12px; color: #fff; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
     .hdr-bar { width: 3px; height: 22px; background: var(--orange); border-radius: 2px; }
     .hdr-right { display: flex; align-items: center; gap: 10px; }
@@ -137,7 +149,7 @@
     .frow-3 { grid-template-columns: 1fr 1fr 1fr; }
 
     /* ── Landing ─────────────────────────────────── */
-    .landing { min-height: calc(100vh - 58px); display: flex; align-items: center; justify-content: center; }
+    .landing { min-height: calc(100vh - 58px); min-height: calc(100dvh - 58px); display: flex; align-items: center; justify-content: center; }
     .landing-inner { text-align: center; max-width: 560px; padding: 32px 24px; }
     .landing-title { font-size: 32px; font-weight: 700; color: var(--slate); margin-bottom: 8px; letter-spacing: -0.03em; }
     .landing-sub { color: var(--text-muted); margin-bottom: 40px; font-size: 15px; line-height: 1.6; }
@@ -281,13 +293,92 @@
     .cal-bk-item:last-child { border-bottom: none; }
     .cal-bk-bar { width: 4px; min-height: 44px; background: var(--orange); border-radius: 2px; flex-shrink: 0; }
 
-    @media (max-width: 600px) {
+    /* Only animate hover on devices with a real cursor (kills sticky-hover on touch) */
+    @media (hover: none) {
+      .btn:hover:not(:disabled),
+      .prop-card:hover,
+      .stat:hover,
+      .room-chip.avail[data-a]:hover,
+      .role-card:hover { transform: none; box-shadow: var(--shadow-xs); }
+      .role-card:hover { border-color: var(--border); }
+    }
+
+    /* ── Tablet & below ─────────────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      body { font-size: 15px; }
+      .page { padding: 20px 16px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+      .hdr { padding: 0 16px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+
+      /* Inputs at 16px stop iOS Safari from zooming on focus */
+      input[type=text], input[type=email], input[type=number], input[type=url], input[type=date], input[type=password], select, textarea { font-size: 16px; padding: 11px 12px; }
+
+      /* Bigger touch targets */
+      .btn { padding: 11px 18px; font-size: 14px; min-height: 44px; }
+      .btn-sm { padding: 8px 13px; font-size: 13px; min-height: 36px; }
+      .btn-xs { padding: 6px 10px; font-size: 12px; min-height: 30px; }
+
+      /* Horizontally-scrolling tabs */
+      .tabs { overflow-x: auto; overflow-y: hidden; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; margin-left: -16px; margin-right: -16px; padding: 0 16px; }
+      .tabs::-webkit-scrollbar { display: none; }
+      .tab { padding: 12px 16px; flex-shrink: 0; }
+
+      /* Tables get a horizontal scroll wrapper without HTML changes */
+      .card > table, .card .table-wrap > table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
+      th, td { padding: 10px 12px; }
+
+      /* Modals fill more screen, less inner padding, respect dvh for Safari toolbar */
+      .overlay { padding: 12px; align-items: flex-end; }
+      .modal { padding: 20px; border-radius: 14px; max-height: 92dvh; }
+      .modal-foot { flex-wrap: wrap; gap: 10px; }
+      .modal-foot .btn { flex: 1 1 auto; min-width: 0; justify-content: center; }
+
       .frow-2, .frow-3 { grid-template-columns: 1fr; }
       .role-grid { grid-template-columns: 1fr; }
-      .rooms-grid, .rs-grid { grid-template-columns: 1fr 1fr; }
-      .prop-hdr { flex-direction: column; }
-      .page { padding: 20px 16px; }
-      .hdr { padding: 0 16px; }
+      .stat-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+      .stat { padding: 14px 16px; }
+      .stat-val { font-size: 22px; }
+      .rooms-grid, .rs-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+      .room-chip, .rs-item { padding: 12px; min-height: 56px; }
+
+      /* Stack the page header so the action button has room */
+      .page-hdr { flex-direction: column; align-items: stretch; gap: 14px; }
+      .page-hdr > :last-child:not(:only-child) { align-self: flex-start; }
+
+      .prop-card { padding: 16px; }
+      .prop-hdr { flex-direction: column; gap: 10px; }
+      .prop-acts { width: 100%; }
+      .prop-acts .btn { flex: 1 1 auto; justify-content: center; }
+
+      .card { padding: 18px 16px; }
+      .cal-wrap, .cal-bk-list { padding: 16px 14px; }
+      .cal-cell { height: 40px; }
+      .cal-num { width: 30px; height: 30px; font-size: 12px; }
+      .cal-range, .cal-cell.is-today:not(.booked) .cal-num { /* keep alignment */ }
+
+      .wk-row { padding: 14px 16px; }
+
+      /* Booking info rows wrap onto their own line so values aren't squeezed */
+      .info-row { flex-direction: column; gap: 4px; }
+      .info-lbl { min-width: 0; }
+
+      .sync-pill { padding: 4px 8px; font-size: 10px; }
+      .hdr-role { display: none; }
+    }
+
+    /* ── Phone ─────────────────────────────────────────────────────────────── */
+    @media (max-width: 480px) {
+      .hdr-logo { font-size: 13px; gap: 8px; }
+      .hdr-right { gap: 6px; }
+      .page-title { font-size: 19px; }
+      .modal { padding: 18px 16px; border-radius: 12px 12px 0 0; max-height: 94dvh; padding-bottom: max(18px, env(safe-area-inset-bottom)); }
+      .overlay { padding: 0; align-items: flex-end; }
+      .stat-grid { grid-template-columns: 1fr; }
+      .rooms-grid, .rs-grid { grid-template-columns: 1fr; }
+      .landing-title { font-size: 26px; }
+      .landing-sub { font-size: 14px; margin-bottom: 28px; }
+      .landing-inner { padding: 24px 16px; }
+      .role-card { padding: 24px 20px; }
+      .role-icon { font-size: 28px; margin-bottom: 10px; }
     }
   </style>
 </head>
