@@ -4,7 +4,7 @@
   PURPOSE: BAE Air project accommodation tracker — Newton internal tool.
            Two views: team member (sign up, view bookings) and organiser
            (manage properties, budget, members, send details).
-  VERSION: 1.4 | 2026-05-20
+  VERSION: 1.5 | 2026-05-20
   CHANGES:
     v1.0 2026-05-18 -- Initial build. Self-contained single-file app using
                        localStorage for persistence. No server required.
@@ -26,6 +26,10 @@
                        touch targets, horizontally-scrolling tabs, modal
                        sheet style on small screens, table overflow scroll,
                        stacked page header, hover-only hover effects.
+    v1.5 2026-05-20 -- Per-person colour tints on roommate pills and the
+                       Who's-where room chips. Colours are deterministic
+                       (hash of name) so the same person always renders in
+                       the same colour across views.
   CAVEATS:
     - Email sending opens the local mail client via mailto: links
     - Local fallback: data is stored in browser localStorage under
@@ -547,6 +551,28 @@ function fmtShort(d) {
 function gbp(n) { return '£' + Number(n || 0).toLocaleString('en-GB', { maximumFractionDigits: 0 }); }
 function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+// Deterministic per-person tint so the same name always renders in the same
+// colour wherever it appears. Tints avoid orange/red/green to stay clear of
+// the brand and the avail/booked semantics.
+const PERSON_PALETTE = [
+  { bg: '#DBEAFE', fg: '#1E40AF' }, // blue
+  { bg: '#EDE9FE', fg: '#5B21B6' }, // violet
+  { bg: '#CCFBF1', fg: '#115E59' }, // teal
+  { bg: '#FCE7F3', fg: '#9D174D' }, // pink
+  { bg: '#FEF3C7', fg: '#92400E' }, // amber
+  { bg: '#CFFAFE', fg: '#155E75' }, // cyan
+  { bg: '#E0E7FF', fg: '#3730A3' }, // indigo
+  { bg: '#FFE4E6', fg: '#9F1239' }, // rose
+  { bg: '#F3E8FF', fg: '#6B21A8' }, // purple
+  { bg: '#E2E8F0', fg: '#1E293B' }, // slate
+];
+function personColor(seed) {
+  let h = 5381;
+  const s = String(seed || '');
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return PERSON_PALETTE[Math.abs(h) % PERSON_PALETTE.length];
+}
+
 // ── CRUD ─────────────────────────────────────────────────────────────────────
 
 function addProp(d)    { set({ properties: [...S.properties, { id: uid(), ...d }] }); }
@@ -961,7 +987,7 @@ function memBookingsView(m) {
         ${room ? `<div class="info-row"><span class="info-lbl">Your room</span><span>${esc(room.name)} <span class="badge b-grey">${rtl(room.type)}</span></span></div>` : ''}
         <div class="info-row">
           <span class="info-lbl">Staying with</span>
-          ${others.length ? `<div class="roommates">${others.map(n=>`<span class="rtag">${esc(n)}</span>`).join('')}</div>` : '<span class="muted sm">No other team members booked yet</span>'}
+          ${others.length ? `<div class="roommates">${others.map(n=>{const c=personColor(n);return `<span class="rtag" style="background:${c.bg};color:${c.fg};">${esc(n)}</span>`;}).join('')}</div>` : '<span class="muted sm">No other team members booked yet</span>'}
         </div>
         ${p.notes ? `<div class="info-row"><span class="info-lbl">Notes</span><span class="sm muted">${esc(p.notes)}</span></div>` : ''}
       </div>`;
@@ -1196,12 +1222,20 @@ function memHousesView(m) {
         </div>
       </div>
       <div class="rooms-grid" style="margin-top:14px;">
-        ${rooms.map(({ r, who, isMe }) => `
+        ${rooms.map(({ r, who, isMe }) => {
+          const c = who && !isMe ? personColor(who.name) : null;
+          const whoHtml = isMe
+            ? `<span class="rc-who taken">You</span>`
+            : who
+              ? `<span class="rc-who" style="color:${c.fg};font-weight:600;">${esc(who.name)}</span>`
+              : `<span class="rc-who avail">Available</span>`;
+          return `
           <div class="room-chip ${isMe ? 'me' : who ? 'taken' : 'avail'}">
             <div class="rc-name">${esc(r.name)}</div>
             <div class="rc-type">${rtl(r.type)}</div>
-            <div class="rc-who ${isMe ? 'taken' : who ? 'taken' : 'avail'}">${isMe ? 'You' : who ? esc(who.name) : 'Available'}</div>
-          </div>`).join('')}
+            ${whoHtml}
+          </div>`;
+        }).join('')}
       </div>
     </div>`;
   }).join('');
