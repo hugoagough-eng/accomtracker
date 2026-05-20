@@ -4,7 +4,7 @@
   PURPOSE: BAE Air project accommodation tracker — Newton internal tool.
            Two views: team member (sign up, view bookings) and organiser
            (manage properties, budget, members, send details).
-  VERSION: 1.5 | 2026-05-20
+  VERSION: 1.6 | 2026-05-20
   CHANGES:
     v1.0 2026-05-18 -- Initial build. Self-contained single-file app using
                        localStorage for persistence. No server required.
@@ -30,6 +30,12 @@
                        Who's-where room chips. Colours are deterministic
                        (hash of name) so the same person always renders in
                        the same colour across views.
+    v1.6 2026-05-20 -- Ratings: 1-5 star rating for the property and each
+                       housemate per booking, with optional comments.
+                       New propertyRatings and memberRatings arrays sync
+                       across devices. Organiser gets a Ratings tab
+                       showing per-member and per-property averages,
+                       counts, and the verbatim comments each rater left.
   CAVEATS:
     - Email sending opens the local mail client via mailto: links
     - Local fallback: data is stored in browser localStorage under
@@ -245,6 +251,26 @@
     .roommates { display: flex; flex-wrap: wrap; gap: 5px; }
     .rtag { background: #F2F2F7; padding: 3px 10px; border-radius: 20px; font-size: 12px; }
 
+    /* ── Stars ───────────────────────────────────── */
+    .stars { display: inline-flex; gap: 2px; user-select: none; }
+    .stars .star { font-size: 26px; line-height: 1; color: var(--border-strong); cursor: pointer; padding: 4px; transition: color 0.1s, transform 0.1s; }
+    .stars .star.on { color: #F59E0B; }
+    .stars .star:hover { transform: scale(1.12); }
+    .stars.ro .star { cursor: default; pointer-events: none; padding: 0; font-size: 16px; }
+    .rate-row { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+    .rate-row:last-child { border-bottom: none; }
+    .rate-row-name { font-weight: 600; font-size: 13px; flex: 1; min-width: 0; }
+    .rate-block { padding: 16px 0; border-bottom: 1px solid var(--border); }
+    .rate-block:last-of-type { border-bottom: none; }
+    .rate-block-hdr { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+    .rate-comment { width: 100%; min-height: 48px; margin-top: 8px; font-size: 13px; }
+    .rating-score { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; color: var(--slate); }
+    .rating-score .num { font-variant-numeric: tabular-nums; }
+    .rating-score .count { color: var(--text-muted); font-weight: 500; font-size: 12px; }
+    .rating-comments { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+    .rating-comment { background: #F9F9FB; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 12px; color: var(--text); }
+    .rating-comment .rc-meta { color: var(--text-muted); font-size: 11px; margin-top: 4px; }
+
     /* ── Email preview ───────────────────────────── */
     .email-pre { background: #F9F9FB; border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-size: 12px; font-family: 'Courier New', monospace; white-space: pre-wrap; max-height: 320px; overflow-y: auto; }
 
@@ -403,7 +429,7 @@
 const STORE_KEY = 'accom_tracker_v1';
 const SYNC_BASE = 'https://api.jsonbin.io/v3/b';
 const SYNC_LS_KEY = 'accom_tracker_sync_v1';
-const SYNC_FIELDS = ['properties', 'members', 'bookings', 'weeklyBudgets'];
+const SYNC_FIELDS = ['properties', 'members', 'bookings', 'weeklyBudgets', 'propertyRatings', 'memberRatings'];
 const POLL_MS = 4000;
 const PUSH_DEBOUNCE_MS = 600;
 
@@ -430,7 +456,7 @@ let S = load();
 let F = {}; // ephemeral form/modal state
 
 function defaultData() {
-  return { properties: [], members: [], bookings: [], weeklyBudgets: {}, updatedAt: 0 };
+  return { properties: [], members: [], bookings: [], weeklyBudgets: {}, propertyRatings: [], memberRatings: [], updatedAt: 0 };
 }
 
 function defaultUI() {
@@ -440,7 +466,7 @@ function defaultUI() {
     memTab: 'bookings',       // 'bookings' | 'available' | 'houses' | 'calendar'
     memHouseWc: null,         // selected W/C in the houses tab (null = first week)
     memCalYM: null,           // YYYY-MM for calendar view (null = current month)
-    orgTab: 'properties',     // 'properties' | 'budget' | 'members' | 'send'
+    orgTab: 'properties',     // 'properties' | 'budget' | 'members' | 'ratings' | 'send'
     modal: null,              // null | { type, data }
     expanded: null,           // expanded property id (organiser list)
     expandedBudgetWk: null,   // expanded W/C in budget tab
@@ -488,6 +514,54 @@ function freeRooms(pid) {
   const p = prop(pid); if (!p) return [];
   const taken = S.bookings.filter(b => b.propertyId === pid).map(b => b.roomId);
   return p.rooms.filter(r => !taken.includes(r.id));
+}
+
+// ── Ratings ──────────────────────────────────────────────────────────────────
+// Property ratings: one per (propertyId, raterId). Member ratings: one per
+// (subjectId, raterId). Score is 1..5; comment is optional. Upsert in place.
+
+function propRatingsFor(pid)        { return S.propertyRatings.filter(r => r.propertyId === pid); }
+function propRatingByRater(pid, rid){ return S.propertyRatings.find(r => r.propertyId === pid && r.raterId === rid); }
+function memRatingsOf(subjectId)    { return S.memberRatings.filter(r => r.subjectId === subjectId); }
+function memRatingByRater(subjectId, raterId) { return S.memberRatings.find(r => r.subjectId === subjectId && r.raterId === raterId); }
+
+function avg(scores) {
+  if (!scores.length) return null;
+  return scores.reduce((a, b) => a + b, 0) / scores.length;
+}
+
+// Upsert a single rating into an array, matched by the given key fields.
+// Returns the next array; caller decides when to commit via set().
+function upsertRating(list, matchKeys, patch) {
+  const i = list.findIndex(r => matchKeys.every(k => r[k] === patch[k]));
+  const stamped = { ...patch, createdAt: Date.now() };
+  if (i >= 0) return list.map((r, idx) => idx === i ? { ...r, ...stamped } : r);
+  return [...list, { id: uid(), ...stamped }];
+}
+
+function starInput(name, currentVal) {
+  const v = currentVal || 0;
+  return `<div class="stars" data-name="${esc(name)}" data-val="${v}">${
+    [1,2,3,4,5].map(i => `<span class="star ${i <= v ? 'on' : ''}" data-i="${i}" onclick="setStar(this)">&#9733;</span>`).join('')
+  }</div>`;
+}
+
+function starsRO(score, count) {
+  if (score == null) return `<span class="muted sm">Not rated yet</span>`;
+  const full = Math.round(score);
+  return `<span class="rating-score"><span class="stars ro">${
+    [1,2,3,4,5].map(i => `<span class="star ${i <= full ? 'on' : ''}">&#9733;</span>`).join('')
+  }</span><span class="num">${score.toFixed(1)}</span>${count != null ? `<span class="count">(${count})</span>` : ''}</span>`;
+}
+
+// Called from inline onclick on each star. Clicking the same star clears.
+function setStar(el) {
+  const wrap = el.closest('.stars');
+  const val  = +el.dataset.i;
+  const cur  = +wrap.dataset.val || 0;
+  const next = cur === val ? 0 : val;
+  wrap.dataset.val = next;
+  wrap.querySelectorAll('.star').forEach((s, idx) => s.classList.toggle('on', idx < next));
 }
 
 function isoDate(d) {
@@ -791,6 +865,8 @@ async function pushLocal() {
         properties: mergeArrays(S.properties, remote.properties, base.properties),
         members:    mergeArrays(S.members,    remote.members,    base.members),
         bookings:   mergeArrays(S.bookings,   remote.bookings,   base.bookings),
+        propertyRatings: mergeArrays(S.propertyRatings, remote.propertyRatings, base.propertyRatings),
+        memberRatings:   mergeArrays(S.memberRatings,   remote.memberRatings,   base.memberRatings),
         weeklyBudgets: { ...(remote.weeklyBudgets || {}), ...(S.weeklyBudgets || {}) },
         updatedAt: Date.now(),
       };
@@ -981,6 +1057,7 @@ function memBookingsView(m) {
           <div class="prop-acts">
             ${p.listingLink ? `<a class="btn btn-outline btn-sm" href="${esc(p.listingLink)}" target="_blank" rel="noopener">View listing</a>` : ''}
             <button class="btn btn-outline btn-sm" data-a="add-to-cal" data-bid="${b.id}">&#128197; Add to calendar</button>
+            <button class="btn btn-outline btn-sm" data-a="open-rate"  data-bid="${b.id}">&#9733; Rate stay</button>
             <button class="btn btn-danger btn-sm" data-a="unbook" data-bid="${b.id}">Remove booking</button>
           </div>
         </div>
@@ -1288,11 +1365,13 @@ function viewOrganiser() {
       <div class="tab ${S.orgTab==='properties'?'active':''}" data-a="org-tab" data-tab="properties">Properties</div>
       <div class="tab ${S.orgTab==='budget'?'active':''}"     data-a="org-tab" data-tab="budget">Budget</div>
       <div class="tab ${S.orgTab==='members'?'active':''}"    data-a="org-tab" data-tab="members">Members</div>
+      <div class="tab ${S.orgTab==='ratings'?'active':''}"    data-a="org-tab" data-tab="ratings">Ratings</div>
       <div class="tab ${S.orgTab==='send'?'active':''}"       data-a="org-tab" data-tab="send">Send details</div>
     </div>
     ${S.orgTab==='properties' ? orgProps() :
       S.orgTab==='budget'     ? orgBudget() :
       S.orgTab==='members'    ? orgMembers() :
+      S.orgTab==='ratings'    ? orgRatings() :
       orgSend()}
   </div>`;
 }
@@ -1531,6 +1610,91 @@ function orgMembers() {
   </div>`}`;
 }
 
+// Ratings tab — per-member and per-property aggregates with recent comments
+function orgRatings() {
+  const fmtTs = ts => {
+    if (!ts) return '';
+    const d = new Date(ts);
+    return `${String(d.getDate()).padStart(2,'0')} ${d.toLocaleString('en-GB',{month:'short'})} ${d.getFullYear()}`;
+  };
+
+  // Members: rank by avg desc, then count desc, then name
+  const memberRows = S.members
+    .map(m => {
+      const rs = memRatingsOf(m.id);
+      const a = avg(rs.map(r => r.score));
+      return { m, ratings: rs, average: a, count: rs.length };
+    })
+    .sort((x, y) => (y.average || 0) - (x.average || 0) || y.count - x.count || x.m.name.localeCompare(y.m.name));
+
+  const memberSection = !S.members.length
+    ? `<div class="sm muted">No members yet.</div>`
+    : memberRows.map(({ m, ratings, average, count }) => {
+        const c = personColor(m.name);
+        const sorted = [...ratings].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        return `<div class="mem-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+          <div class="fb" style="gap:12px;">
+            <div style="flex:1;min-width:0;">
+              <div class="mem-name" style="color:${c.fg};">${esc(m.name)}</div>
+              <div class="mem-email">${esc(m.email || 'No email')}</div>
+            </div>
+            <div>${starsRO(average, count)}</div>
+          </div>
+          ${sorted.length ? `<div class="rating-comments">${sorted.map(r => {
+            const rater = mem(r.raterId);
+            const rc = rater ? personColor(rater.name) : null;
+            return `<div class="rating-comment">
+              ${r.comment ? esc(r.comment) : '<span class="muted">No comment</span>'}
+              <div class="rc-meta">${starsRO(r.score, null)} &middot; by <span style="color:${rc?rc.fg:'inherit'};font-weight:600;">${esc(rater?.name || 'Unknown')}</span> &middot; ${fmtTs(r.createdAt)}</div>
+            </div>`;
+          }).join('')}</div>` : ''}
+        </div>`;
+      }).join('');
+
+  // Properties: only those with any ratings, ranked by avg desc
+  const propRows = S.properties
+    .map(p => {
+      const rs = propRatingsFor(p.id);
+      const a = avg(rs.map(r => r.score));
+      return { p, ratings: rs, average: a, count: rs.length };
+    })
+    .filter(x => x.count > 0)
+    .sort((x, y) => (y.average || 0) - (x.average || 0) || y.count - x.count || x.p.name.localeCompare(y.p.name));
+
+  const propSection = !propRows.length
+    ? `<div class="sm muted">No property ratings yet.</div>`
+    : propRows.map(({ p, ratings, average, count }) => {
+        const sorted = [...ratings].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        return `<div class="mem-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+          <div class="fb" style="gap:12px;">
+            <div style="flex:1;min-width:0;">
+              <div class="mem-name">${esc(p.name)}</div>
+              <div class="mem-email">${esc(p.location || '')} &middot; ${fmtShort(p.weekStart)} &ndash; ${fmtShort(p.weekEnd)}</div>
+            </div>
+            <div>${starsRO(average, count)}</div>
+          </div>
+          <div class="rating-comments">${sorted.map(r => {
+            const rater = mem(r.raterId);
+            const rc = rater ? personColor(rater.name) : null;
+            return `<div class="rating-comment">
+              ${r.comment ? esc(r.comment) : '<span class="muted">No comment</span>'}
+              <div class="rc-meta">${starsRO(r.score, null)} &middot; by <span style="color:${rc?rc.fg:'inherit'};font-weight:600;">${esc(rater?.name || 'Unknown')}</span> &middot; ${fmtTs(r.createdAt)}</div>
+            </div>`;
+          }).join('')}</div>
+        </div>`;
+      }).join('');
+
+  return `
+    <div class="card">
+      <div class="card-hdr"><div><div class="card-title">Member ratings</div><div class="card-sub">Average score and feedback each member has received from housemates</div></div></div>
+      ${memberSection}
+    </div>
+    <div class="card" style="margin-top:14px;">
+      <div class="card-hdr"><div><div class="card-title">Property ratings</div><div class="card-sub">How team members rated each accommodation</div></div></div>
+      ${propSection}
+    </div>`;
+}
+
 // Send details tab
 function orgSend() {
   if (!S.properties.length) return `<div class="empty"><div class="empty-title">No properties added</div><div class="sm muted">Add properties first to send details to team members.</div></div>`;
@@ -1611,6 +1775,7 @@ function renderModal() {
   else if (type === 'import-confirm') inner = modalImportConfirm(data);
   else if (type === 'share-setup') inner = modalShareSetup();
   else if (type === 'share-link')  inner = modalShareLink(data);
+  else if (type === 'rate-stay')   inner = modalRateStay(data);
   return `<div class="overlay" data-a="overlay-close"><div class="modal">${inner}</div></div>`;
 }
 
@@ -1780,6 +1945,57 @@ function modalShareSetup() {
   <div class="modal-foot">
     <button class="btn btn-outline" data-a="close-modal">Cancel</button>
     <button class="btn btn-primary"  data-a="save-share-setup">Create share link</button>
+  </div>`;
+}
+
+function modalRateStay(data) {
+  const b = S.bookings.find(x => x.id === data?.bookingId);
+  if (!b) return `<div class="modal-hdr"><div class="modal-title">Booking not found</div><button class="modal-close" data-a="close-modal">&times;</button></div>`;
+  const p  = prop(b.propertyId);
+  const me = mem(b.memberId);
+  if (!p || !me) return `<div class="modal-hdr"><div class="modal-title">Booking not found</div><button class="modal-close" data-a="close-modal">&times;</button></div>`;
+
+  const roommates = propBookings(p.id)
+    .filter(x => x.memberId !== me.id)
+    .map(x => mem(x.memberId))
+    .filter(Boolean);
+  const existPR = propRatingByRater(p.id, me.id);
+
+  return `
+  <div class="modal-hdr">
+    <div class="modal-title">Rate your stay</div>
+    <button class="modal-close" data-a="close-modal">&times;</button>
+  </div>
+  <div class="sm muted" style="margin:-8px 0 16px;">${esc(p.name)} &middot; ${fmtShort(p.weekStart)} &ndash; ${fmtShort(p.weekEnd)}</div>
+
+  <div class="rate-block">
+    <div class="rate-block-hdr">
+      <div class="fw6">The property</div>
+      ${starInput('prop', existPR?.score)}
+    </div>
+    <textarea class="rate-comment" id="rate-comment-prop" placeholder="Optional note — what was good, what to flag for next time">${esc(existPR?.comment || '')}</textarea>
+  </div>
+
+  ${roommates.length ? `
+  <div class="rate-block">
+    <div class="fw6" style="margin-bottom:10px;">Housemates</div>
+    ${roommates.map(rm => {
+      const existing = memRatingByRater(rm.id, me.id);
+      const c = personColor(rm.name);
+      return `
+      <div style="padding:12px 0;border-bottom:1px solid var(--border);">
+        <div class="rate-row" style="padding:0;border:none;">
+          <span class="rate-row-name" style="color:${c.fg};">${esc(rm.name)}</span>
+          ${starInput('mem-' + rm.id, existing?.score)}
+        </div>
+        <textarea class="rate-comment" id="rate-comment-mem-${rm.id}" placeholder="Optional note">${esc(existing?.comment || '')}</textarea>
+      </div>`;
+    }).join('')}
+  </div>` : `<div class="sm muted" style="margin-top:12px;">No housemates to rate for this booking.</div>`}
+
+  <div class="modal-foot">
+    <button class="btn btn-outline" data-a="close-modal">Cancel</button>
+    <button class="btn btn-primary" data-a="save-rate" data-bid="${b.id}">Save ratings</button>
   </div>`;
 }
 
@@ -2241,6 +2457,45 @@ function onClick(e) {
 
     case 'add-to-cal': downloadIcs(el.dataset.bid); break;
     case 'unbook': unbook(el.dataset.bid); break;
+
+    case 'open-rate': set({ modal: { type: 'rate-stay', data: { bookingId: el.dataset.bid } } }); break;
+
+    case 'save-rate': {
+      const b = S.bookings.find(x => x.id === el.dataset.bid);
+      if (!b) break;
+      const raterId = b.memberId;
+
+      const readStars = name => {
+        const w = document.querySelector(`.modal .stars[data-name="${name}"]`);
+        return w ? +w.dataset.val || 0 : 0;
+      };
+      const readComment = id => (document.getElementById(id)?.value || '').trim();
+
+      let propRatings = S.propertyRatings;
+      const propScore = readStars('prop');
+      const propComment = readComment('rate-comment-prop');
+      if (propScore > 0) {
+        propRatings = upsertRating(propRatings, ['propertyId', 'raterId'], {
+          propertyId: b.propertyId, raterId, score: propScore, comment: propComment,
+        });
+      }
+
+      let memberRatings = S.memberRatings;
+      propBookings(b.propertyId)
+        .filter(x => x.memberId !== raterId)
+        .forEach(x => {
+          const score = readStars('mem-' + x.memberId);
+          const comment = readComment('rate-comment-mem-' + x.memberId);
+          if (score > 0) {
+            memberRatings = upsertRating(memberRatings, ['subjectId', 'raterId'], {
+              subjectId: x.memberId, raterId, score, comment,
+            });
+          }
+        });
+
+      set({ propertyRatings: propRatings, memberRatings, modal: null });
+      break;
+    }
 
     case 'quick-book': {
       const { pid, rid } = el.dataset;
